@@ -1,3 +1,5 @@
+<img width="1837" height="1126" alt="image" src="https://github.com/user-attachments/assets/681d1eed-b32a-49f8-829b-024d9321753c" />
+
 # Pillar–Modiolar Classifier
 
 A small **Napari-based** desktop app to help analyze IHC synapses. It:
