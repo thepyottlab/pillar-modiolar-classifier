@@ -3,7 +3,7 @@
 
 # Pillar–Modiolar Classifier
 
-A small **Napari-based** desktop app to help analyze IHC synapses. It:
+A small **Napari-based** desktop app to help analyze inner hair cell synapses. It:
 
 * Loads groups of `.xls` files named with suffix tokens (e.g., `ID A ribbon.xls`, `ID A psd.xls`, `ID A sum.xls`)
 * Builds per-IHC pillar–modiolar planes
