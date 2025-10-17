@@ -134,6 +134,7 @@ pip install -e .[all]   # or simply: pip install -e .
 
 # launch the GUI
 python -m pmc_app
+```
 
 ---
 
