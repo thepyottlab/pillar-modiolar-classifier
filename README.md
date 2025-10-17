@@ -107,8 +107,9 @@ ID A sum.xls      # positions (apical/basal/IHC etc.)
 
 * **Object names must match Imaris**: Ensure IHC, pillar, and modiolar labels in the app match the object names used in your exported tables.
 * **Suffix tokens**: If “Load files” finds no groups, double-check your suffix tokens and file extension in the **Import** section.
-* **Viewer closed manually** Just click **Assess selected** again, the app will reopen the viewer.
+* **Viewer closed manually**: Just click **Assess selected** again, the app will reopen the viewer.
 * **Ribbons-only / PSDs-only**: These modes hide the other modality’s UI toggles and processing where appropriate.
+* **Plane definition**: The pillar–modiolar plane is derived from the apical and basal spots on each inner hair cell and bounded by the outermost ribbon and PSD coordinates in the XY plane. The Z-position of the plane is held constant, meaning its accuracy depends on the cochlea being mounted flat. If the Z-stack is uneven (e.g., the inner hair cells are on a fold) or the inner hair cells are rotated or tilted, the plane may not accurately separate the pillar and modiolar sides.
 
 ---
 
