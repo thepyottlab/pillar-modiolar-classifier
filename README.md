@@ -121,7 +121,7 @@ Requirements:
 
 ```bash
 # clone your fork or this repo
-git clone https://github.com/TomNaber/pillar-modiolar-classifier
+git clone https://github.com/thepyottlab/pillar-modiolar-classifier
 cd pillar-modiolar-classifier
 
 # create and activate a venv (PowerShell example)
@@ -129,11 +129,15 @@ python -m venv .venv
 .venv\Scripts\activate
 
 # install in editable mode with deps
-pip install -U pip
+python.exe -m pip install -U pip
 pip install -e .[all]   # or simply: pip install -e .
 
 # launch the GUI
 python -m pmc_app
+
+# Using the command line interface
+ python -m pmc_app.cli gui  # Launch the GUI
+ pmc_app.cli export_all "C:\folder_path" # Classify and export all files to an automatically created exports folder
 ```
 
 ---

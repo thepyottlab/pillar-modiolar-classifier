@@ -9,6 +9,8 @@ assets resolved from the installed package.
 """
 
 import configparser
+import os
+import sys
 from dataclasses import asdict
 from datetime import datetime
 from importlib.resources import files
@@ -49,7 +51,7 @@ GROUP_BORDER_THICKNESS = 1
 GROUP_BORDER_RADIUS = 12
 GROUP_BORDER_COLOR = "#C8CDD3"
 BETWEEN_CARD_PADDING = 10
-MARGINS_APP_AREA = (10, 20 ,10 , 20)
+MARGINS_APP_AREA = (10, 20, 10, 20)
 
 SPC_IMPORT = 0
 SPC_OBJECTS = 5
@@ -103,6 +105,10 @@ PROG_CORNER_RADIUS = 9
 PROG_BORDER_COLOR = "#C8CDD3"
 PROG_BG_COLOR = "#FFFFFF"
 PROG_CHUNK_COLOR = "#228B22"
+
+CONFIG_VENDOR = "ThePyottLab"
+CONFIG_APP = "PillarModiolarClassifier"
+CONFIG_FILENAME = "config.ini"
 
 
 def _resource_path(name: str) -> str:
@@ -175,6 +181,42 @@ QPushButton#import:pressed {{
 }}
 QCheckBox {{ spacing: 6px; margin-left: 0px; }}
 """.strip()
+
+
+def _user_config_dir() -> Path:
+    if sys.platform.startswith("win"):
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+    elif sys.platform == "darwin":
+        base = str(Path.home() / "Library" / "Application Support")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / CONFIG_VENDOR / CONFIG_APP
+
+
+def _user_config_path() -> Path:
+    return _user_config_dir() / CONFIG_FILENAME
+
+
+def _legacy_config_path() -> Path:
+    return Path("config.ini")
+
+
+def _read_config_from(path: Path) -> Optional[configparser.ConfigParser]:
+    try:
+        if not path.exists():
+            return None
+        cp = configparser.ConfigParser()
+        cp.read(path)
+        return cp
+    except Exception:
+        return None
+
+
+def _ensure_parent_dir(p: Path) -> None:
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
 
 
 def header(text: str, gap_px: int) -> Label:
@@ -536,29 +578,40 @@ class App:
     def _persist_inputs_if_enabled(self) -> None:
         if not self.w_remember_fields.value:
             return
-        cfg_ini = Path("config.ini")
-        if not cfg_ini.exists():
-            return
+        cfg_path = _user_config_path()
+        _ensure_parent_dir(cfg_path)
         cp = configparser.ConfigParser()
-        cp.read(cfg_ini)
+        if cfg_path.exists():
+            try:
+                cp.read(cfg_path)
+            except Exception:
+                cp = configparser.ConfigParser()
         if "inputs" not in cp:
             cp["inputs"] = {}
         snap = asdict(self._snap_cfg())
         snap["folder"] = str(snap["folder"])
         for k, v in snap.items():
             cp["inputs"][k] = str(v)
-        with cfg_ini.open("w", encoding="utf-8") as f:
+        with cfg_path.open("w", encoding="utf-8") as f:
             cp.write(f)
 
     def _load_persisted_inputs(self) -> None:
-        cfg_ini = Path("config.ini")
-        if not cfg_ini.exists():
+        user_cfg = _read_config_from(_user_config_path())
+        if user_cfg is None:
+            legacy = _read_config_from(_legacy_config_path())
+            if legacy is None:
+                return
+            user_cfg = legacy
+            try:
+                cfg_path = _user_config_path()
+                _ensure_parent_dir(cfg_path)
+                with cfg_path.open("w", encoding="utf-8") as f:
+                    legacy.write(f)
+            except Exception:
+                pass
+        if "inputs" not in user_cfg:
             return
-        cp = configparser.ConfigParser()
-        cp.read(cfg_ini)
-        if "inputs" not in cp:
-            return
-        sec = cp["inputs"]
+        sec = user_cfg["inputs"]
         remember = sec.getboolean("remember_input_fields", fallback=False)
         self.w_remember_fields.value = remember
         if not remember:
@@ -597,14 +650,13 @@ class App:
 
     def _write_remember_flag(self, state: bool) -> None:
         try:
-            cfg_ini = Path("config.ini")
-            cp = configparser.ConfigParser()
-            if cfg_ini.exists():
-                cp.read(cfg_ini)
+            cfg_path = _user_config_path()
+            _ensure_parent_dir(cfg_path)
+            cp = _read_config_from(cfg_path) or configparser.ConfigParser()
             if "inputs" not in cp:
                 cp["inputs"] = {}
             cp["inputs"]["remember_input_fields"] = "true" if state else "false"
-            with cfg_ini.open("w", encoding="utf-8") as f:
+            with cfg_path.open("w", encoding="utf-8") as f:
                 cp.write(f)
         except Exception:
             pass
@@ -846,9 +898,7 @@ class App:
                 self._ensure_required_objects_in_df(df, self.cfg, gid)
                 self._progress_tick("Verified objects")
             else:
-                do_rib = not self.cfg.psds_only
-                do_psd = not self.cfg.ribbons_only
-                total_steps = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1
+                total_steps = 8
                 self._progress_start(f"Opening {gid}…", total_steps)
                 g = self.groups[gid]
                 ribbons_df, psds_df, positions_df = parse_group(g, self.cfg)
