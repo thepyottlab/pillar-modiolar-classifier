@@ -28,13 +28,9 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
         existing = [c for c in out_cols if c in df.columns]
         return df[existing].copy()
 
-    # rows having nonempty in any Set column
     mask = df[set_cols].notna() & (df[set_cols].astype(str).apply(lambda s: s.str.strip()) != "")
-    if not mask.any(axis=None):
-        existing = [c for c in out_cols if c in df.columns]
-        return df[existing].copy()
-
-    set_col_series = mask.idxmax(axis=1)
+    has_any = mask.fillna(False).filter(like="Set").any(axis=1)
+    set_col_series = mask.fillna(False).idxmax(axis=1).where(has_any)
     ihc_label = set_col_series.str.extract(r"Set\s*(\d+)", expand=False).astype(object)
     df = df.copy()
     df["ihc_label"] = ihc_label
@@ -63,7 +59,6 @@ def process_position_df(df: pd.DataFrame, cfg: FinderConfig) -> tuple[pd.DataFra
     out_cols = ["id", "object", "object_id", "pos_x", "pos_y", "pos_z"]
     df = df[[c for c in out_cols if c in df.columns]].copy()
 
-    # Derive ihc_label from "Spots <N>"
     df["ihc_label"] = df["object"].astype(str).str.extract(r"^Spots\s*(\d+)", expand=False)
 
     mask = df["ihc_label"].notna()
@@ -83,7 +78,6 @@ def process_position_df(df: pd.DataFrame, cfg: FinderConfig) -> tuple[pd.DataFra
             [
                 cfg.ribbons_obj,
                 cfg.psds_obj,
-                cfg.ihc_obj,
                 cfg.pillar_obj,
                 cfg.modiolar_obj,
                 "apical",

@@ -42,7 +42,6 @@ class FinderConfig:
     extensions: str = ".xls"
     ribbons_obj: str = "ribbons"
     psds_obj: str = "PSDs"
-    ihc_obj: str = "IHC"
     pillar_obj: str = "pillar"
     modiolar_obj: str = "modiolar"
     case_insensitive: bool = True

@@ -78,7 +78,7 @@ S_IMPORT_FOLDER_OBJECTS = 4
 S_CASE_IDENTIFY = 12
 S_IMPORT_FIELDS_OBJECTS = 8
 S_IMPORT_FILTERS_OBJECTS = 8
-S_OBJECTS_OBJECTS = 6
+S_OBJECTS_OBJECTS = 8
 S_NAV_BUTTONS_OBJECTS = 8
 S_EXPORT_BUTTONS_OBJECTS = 10
 
@@ -305,7 +305,6 @@ class App:
 
         self.w_ribbons_obj = LineEdit(label="", value="ribbons")
         self.w_psds_obj = LineEdit(label="", value="PSDs")
-        self.w_ihc_obj = LineEdit(label="", value="IHC")
         self.w_pillar_obj = LineEdit(label="", value="pillar")
         self.w_modiolar_obj = LineEdit(label="", value="modiolar")
 
@@ -335,7 +334,6 @@ class App:
         for lew in (
             self.w_ribbons_obj,
             self.w_psds_obj,
-            self.w_ihc_obj,
             self.w_pillar_obj,
             self.w_modiolar_obj,
         ):
@@ -400,7 +398,6 @@ class App:
             widgets=[
                 vfield("Ribbon object ID", self.w_ribbons_obj),
                 vfield("PSD object ID", self.w_psds_obj),
-                vfield("IHC object ID", self.w_ihc_obj),
                 vfield("Pillar object ID", self.w_pillar_obj),
                 vfield("Modiolar object ID", self.w_modiolar_obj),
             ],
@@ -631,7 +628,6 @@ class App:
 
         _set(self.w_ribbons_obj, "ribbons_obj", "ribbons")
         _set(self.w_psds_obj, "psds_obj", "PSDs")
-        _set(self.w_ihc_obj, "ihc_obj", "IHC")
         _set(self.w_pillar_obj, "pillar_obj", "pillar")
         _set(self.w_modiolar_obj, "modiolar_obj", "modiolar")
 
@@ -672,7 +668,6 @@ class App:
             self.w_positions: ("positions", "Position sheet ID", True),
             self.w_ribbons_obj: ("ribbons_obj", "Ribbon object ID", False),
             self.w_psds_obj: ("psds_obj", "PSDs object ID", False),
-            self.w_ihc_obj: ("ihc_obj", "IHC object ID", False),
             self.w_pillar_obj: ("pillar_obj", "Pillar object ID", False),
             self.w_modiolar_obj: ("modiolar_obj", "Modiolar object ID", False),
         }
@@ -733,7 +728,6 @@ class App:
             extensions=self._get_text(self.w_extensions),
             ribbons_obj=self._get_text(self.w_ribbons_obj),
             psds_obj=self._get_text(self.w_psds_obj),
-            ihc_obj=self._get_text(self.w_ihc_obj),
             pillar_obj=self._get_text(self.w_pillar_obj),
             modiolar_obj=self._get_text(self.w_modiolar_obj),
             case_insensitive=bool(self.w_case_insensitive.value),
@@ -755,7 +749,6 @@ class App:
             extensions=self._get_text(self.w_extensions),
             ribbons_obj=self._get_text(self.w_ribbons_obj),
             psds_obj=self._get_text(self.w_psds_obj),
-            ihc_obj=self._get_text(self.w_ihc_obj),
             pillar_obj=self._get_text(self.w_pillar_obj),
             modiolar_obj=self._get_text(self.w_modiolar_obj),
             case_insensitive=bool(self.w_case_insensitive.value),
@@ -814,12 +807,13 @@ class App:
         psds_df = process_volume_df(psds_df)
         positions_df, _ = process_position_df(positions_df, self.cfg)
         df = merge_dfs(ribbons_df, psds_df, positions_df)
-        self._ensure_required_objects_in_df(df, self.cfg, gid)
+        df = self._ensure_required_objects_in_df(df, self.cfg, gid)
         planes = build_planes(df, self.cfg)
         df = classify_synapses(df, self.cfg, planes)
         return df, planes
 
-    def _ensure_required_objects_in_df(self, df: pd.DataFrame, cfg: FinderConfig, gid: str) -> None:
+    def _ensure_required_objects_in_df(self, df: pd.DataFrame,
+                                       cfg: FinderConfig, gid: str) -> pd.DataFrame:
         if "object" not in df.columns:
             raise RuntimeError("Expected column 'object' not found in data.")
         def _norm(s: str) -> str:
@@ -827,7 +821,6 @@ class App:
             return s.lower() if cfg.case_insensitive else s
         present = {_norm(x) for x in df["object"].astype(str).unique()}
         required_map = {
-            "IHC object ID": cfg.ihc_obj,
             "Pillar object ID": cfg.pillar_obj,
             "Modiolar object ID": cfg.modiolar_obj,
         }
@@ -849,6 +842,28 @@ class App:
                     missing_msgs.append(f"{label} '{val}' not found in dataset.")
         if missing_msgs:
             raise RuntimeError("\n".join(missing_msgs))
+        obj_norm = df["object"].astype(str).map(_norm)
+
+        targets = set()
+        if not cfg.psds_only:
+            targets.add(_norm(cfg.ribbons_obj))
+        if not cfg.ribbons_only:
+            targets.add(_norm(cfg.psds_obj))
+
+        target_mask = obj_norm.isin(targets)
+        na_ihl = df["ihc_label"] == "nan"
+        bad_mask = target_mask & na_ihl
+        n_bad = int(bad_mask.sum())
+
+        if n_bad > 0:
+            n_rib = int(
+                (obj_norm.eq(_norm(cfg.ribbons_obj)) & bad_mask).sum())
+            n_psd = int((obj_norm.eq(_norm(cfg.psds_obj)) & bad_mask).sum())
+            self.log(
+                f"{n_rib} Unclassified ribbons and {n_psd} PSDs were excluded"
+            )
+            df.drop(index=df.index[bad_mask], inplace=True)
+        return df
 
     def _confirm_export_dir(self) -> Optional[Path]:
         if self.w_export_dir.value:
@@ -895,7 +910,7 @@ class App:
                 df = self.df_cache[gid]
                 planes = build_planes(df, self.cfg)
                 self._progress_tick("Built planes")
-                self._ensure_required_objects_in_df(df, self.cfg, gid)
+                df = self._ensure_required_objects_in_df(df, self.cfg, gid)
                 self._progress_tick("Verified objects")
             else:
                 total_steps = 8
@@ -911,7 +926,7 @@ class App:
                 self._progress_tick("Processed positions")
                 df = merge_dfs(ribbons_df, psds_df, positions_df)
                 self._progress_tick("Merged tables")
-                self._ensure_required_objects_in_df(df, self.cfg, gid)
+                df = self._ensure_required_objects_in_df(df, self.cfg, gid)
                 self._progress_tick("Verified objects")
                 planes = build_planes(df, self.cfg)
                 self._progress_tick("Built planes")
@@ -973,7 +988,7 @@ class App:
             else:
                 df, _ = self._build_df_for_group(gid)
                 self.df_cache[gid] = df
-            self._ensure_required_objects_in_df(df, self.cfg, gid)
+            df = self._ensure_required_objects_in_df(df, self.cfg, gid)
         except Exception as e:
             self.log(f"[error] Cannot export '{gid}': {e}")
             return
@@ -1002,7 +1017,7 @@ class App:
                 else:
                     df, _ = self._build_df_for_group(gid)
                     self.df_cache[gid] = df
-                self._ensure_required_objects_in_df(df, self.cfg, gid)
+                df = self._ensure_required_objects_in_df(df, self.cfg, gid)
                 out_path = export_df_csv(df, gid, out_dir)
                 ok += 1
                 self.log(f"[{i}/{total}] Exported '{gid}' to {out_path}")

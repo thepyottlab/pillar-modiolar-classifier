@@ -379,7 +379,7 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
     bind_user_vis(distance_labels_ribbons, "__lbl_ribbons__")
     bind_user_vis(distance_labels_psds, "__lbl_psds__")
 
-    for obj in [o for o in df["object"].unique() if o != cfg.ihc_obj]:
+    for obj in [o for o in df["object"].unique()]:
         rows = df[df["object"] == obj]
         pts = rows[["pos_z", "pos_y", "pos_x"]].to_numpy(float)
         base = base_size_for(obj)
