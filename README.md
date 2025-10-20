@@ -138,8 +138,8 @@ python -m pmc_app
 
 # Using the command line interface
 python -m pmc_app.cli gui  # Launch the GUI
-python -m pmc_app.cli export-all --help # See arguments for exporting all via command line
-python -m pmc_app.cli export-all "D:\" --positions pos --ribbons rib --out-dir "D:\exports" # Example command line export
+python -m pmc_app.cli export-all --help  # See arguments for exporting all via command line
+python -m pmc_app.cli export-all "D:\" --positions pos --ribbons rib --out-dir "D:\exports"  # Example command line export
 ```
 
 ---
