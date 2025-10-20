@@ -137,8 +137,9 @@ pip install -e .[all]   # or simply: pip install -e .
 python -m pmc_app
 
 # Using the command line interface
- python -m pmc_app.cli gui  # Launch the GUI
- pmc_app.cli export_all "C:\folder_path" # Classify and export all files to an automatically created exports folder
+python -m pmc_app.cli gui  # Launch the GUI
+python -m pmc_app.cli export-all --help # See arguments for exporting all via command line
+python -m pmc_app.cli export-all "D:\" --positions pos --ribbons rib --out-dir "D:\exports" # Example command line export
 ```
 
 ---
