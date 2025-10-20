@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 import typer
+import os
 
 from .exporter import export_df_csv
 from .finder import find_groups
@@ -30,13 +31,14 @@ def export_all(
     positions: str = typer.Option("sum"),
     ribbons_obj: str = typer.Option("ribbons"),
     psds_obj: str = typer.Option("PSDs"),
-    ihc_obj: str = typer.Option("IHC"),
     pillar_obj: str = typer.Option("pillar"),
     modiolar_obj: str = typer.Option("modiolar"),
     case_insensitive: bool = typer.Option(True),
     ribbons_only: bool = typer.Option(False),
     psds_only: bool = typer.Option(False),
-    out_dir: Path = typer.Option(Path("exports"), exists=False, file_okay=False, dir_okay=True, writable=True),
+    out_dir: Path = typer.Option(Path(os.environ.get("LOCALAPPDATA")) /
+                                 "Pillar-Modiolar Classifier",
+                                 exists=False, file_okay=False, dir_okay=True, writable=True),
 ):
     """Headless classification and CSV export for all detected groups."""
     cfg = FinderConfig(
@@ -47,7 +49,6 @@ def export_all(
         extensions=extension,
         ribbons_obj=ribbons_obj,
         psds_obj=psds_obj,
-        ihc_obj=ihc_obj,
         pillar_obj=pillar_obj,
         modiolar_obj=modiolar_obj,
         case_insensitive=case_insensitive,
@@ -64,8 +65,8 @@ def export_all(
         rib, psd, pos = parse_group(group, cfg)
         rib = process_volume_df(rib)
         psd = process_volume_df(psd)
-        pos, _ = process_position_df(pos, cfg)
-        df = merge_dfs(rib, psd, pos)
+        pos = process_position_df(pos, cfg)
+        df = merge_dfs(rib, psd, pos, cfg)
 
         from .classifier import build_planes, classify_synapses
 

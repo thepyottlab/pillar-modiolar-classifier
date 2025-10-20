@@ -19,8 +19,6 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
         Normalized DataFrame subset.
     """
     out_cols = ["id", "ihc_label", "object", "object_id", "volume"]
-    if df is None or df.empty:
-        return pd.DataFrame(columns=out_cols)
 
     set_cols = [c for c in df.columns if isinstance(c, str) and c.startswith("Set ")]
 
@@ -35,16 +33,13 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["ihc_label"] = ihc_label
 
-    if "ID" in df.columns:
-        df = df.rename(columns={"ID": "object_id"})
-    if "Volume" in df.columns:
-        df = df.rename(columns={"Volume": "volume"})
+    df = df.rename(columns={"ID": "object_id", "Volume": "volume"})
 
     existing = [c for c in out_cols if c in df.columns]
     return df[existing].copy()
 
 
-def process_position_df(df: pd.DataFrame, cfg: FinderConfig) -> tuple[pd.DataFrame, FinderConfig]:
+def process_position_df(df: pd.DataFrame, cfg: FinderConfig) -> pd.DataFrame:
     """Normalize 'Position' sheet columns and derive apical/basal marks."""
     df = df.rename(
         columns={
@@ -71,24 +66,11 @@ def process_position_df(df: pd.DataFrame, cfg: FinderConfig) -> tuple[pd.DataFra
     df.loc[df["object_id"] == min_id, "object"] = "apical"
     df.loc[df["object_id"] == max_id, "object"] = "basal"
 
-    df.loc[df["object"] == "IHC", "ihc_label"] = df.loc[df["object"] == "IHC", "object_id"]
-
-    df = df[
-        df["object"].isin(
-            [
-                cfg.ribbons_obj,
-                cfg.psds_obj,
-                cfg.pillar_obj,
-                cfg.modiolar_obj,
-                "apical",
-                "basal",
-            ]
-        )
-    ].reset_index(drop=True)
-    return df, cfg
+    return df
 
 
-def merge_dfs(ribbons_df: pd.DataFrame, psds_df: pd.DataFrame, positions_df: pd.DataFrame) -> pd.DataFrame:
+def merge_dfs(ribbons_df: pd.DataFrame, psds_df: pd.DataFrame, positions_df:
+pd.DataFrame, cfg: FinderConfig) -> pd.DataFrame:
     """Merge normalized volume and position frames into a unified table."""
     df_synapses = pd.concat([psds_df, ribbons_df], ignore_index=True)
     df = df_synapses.merge(
@@ -98,6 +80,9 @@ def merge_dfs(ribbons_df: pd.DataFrame, psds_df: pd.DataFrame, positions_df: pd.
     if "ihc_label_temp" in df.columns:
         df["ihc_label"] = df["ihc_label"].fillna(df["ihc_label_temp"])
         df = df.drop(columns="ihc_label_temp")
+
+    mask = df["ihc_label"].isna() & df["object"].isin([cfg.ribbons_obj, cfg.psds_obj])
+    df.loc[mask, "object"] = "Unclassified " + df.loc[mask, "object"]
 
     df = df[["id", "object", "ihc_label", "object_id", "pos_x", "pos_y", "pos_z", "volume"]]
 

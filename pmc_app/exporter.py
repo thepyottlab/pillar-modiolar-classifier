@@ -1,8 +1,8 @@
 from __future__ import annotations
-
 from pathlib import Path
 
 import pandas as pd
+import re
 from qtpy.QtWidgets import QFileDialog
 
 
@@ -16,8 +16,6 @@ def prompt_export_dir() -> Path | None:
 
 def _safe_grouplabel(gid: str) -> str:
     """Filesystem-safe group id for filenames."""
-    import re
-
     s = gid.strip()
     s = re.sub(r"[^\w\-.]+", "_", s)
     return s[:200] if len(s) > 200 else s

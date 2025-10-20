@@ -73,9 +73,9 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
 
     max_vol_ribbon = df.loc[df["object"] == ribbons, "volume"].astype(float).max()
     max_vol_psd = df.loc[df["object"] == psds, "volume"].astype(float).max()
-    if not np.isfinite(max_vol_ribbon) or max_vol_ribbon <= 0:
+    if not np.isfinite(max_vol_ribbon):
         max_vol_ribbon = 1.0
-    if not np.isfinite(max_vol_psd) or max_vol_psd <= 0:
+    if not np.isfinite(max_vol_psd):
         max_vol_psd = 1.0
 
     def hex_to_rgba(h: str) -> np.ndarray:
@@ -384,12 +384,25 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
         pts = rows[["pos_z", "pos_y", "pos_x"]].to_numpy(float)
         base = base_size_for(obj)
         if obj == ribbons:
-            sizes = base * (rows["volume"].astype(float).to_numpy() / max_vol_ribbon)
+            sizes = base * (rows["volume"].astype(
+                float).to_numpy() / max_vol_ribbon)
         elif obj == psds:
-            sizes = base * (rows["volume"].astype(float).to_numpy() / max_vol_psd)
+            sizes = base * (
+                        rows["volume"].astype(float).to_numpy() / max_vol_psd)
         else:
             sizes = base
         colors = colors_for_rows(rows, obj)
+
+        _allowed_visible = {
+            cfg.ribbons_obj,
+            cfg.psds_obj,
+            cfg.pillar_obj,
+            cfg.modiolar_obj,
+            "apical",
+            "basal",
+        }
+        _initial_visible = obj in _allowed_visible
+
         layer = viewer.add_points(
             pts,
             size=sizes,
@@ -397,11 +410,12 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
             face_color=colors,
             name=str(obj),
             blending="translucent",
-            visible=True,
+            visible=_initial_visible,
         )
         layer.metadata["object"] = obj
         point_layers[obj] = layer
-        user_vis[obj] = True
+        user_vis[
+            obj] = _initial_visible
         bind_user_vis(layer, obj)
 
     labels = sorted(

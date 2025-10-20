@@ -184,13 +184,14 @@ QCheckBox {{ spacing: 6px; margin-left: 0px; }}
 
 
 def _user_config_dir() -> Path:
-    if sys.platform.startswith("win"):
-        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    elif sys.platform == "darwin":
-        base = str(Path.home() / "Library" / "Application Support")
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        base = Path.home() / "AppData" / "Local"
     else:
-        base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / CONFIG_VENDOR / CONFIG_APP
+        base = Path(base)
+    cfg_dir = base / "Pillar-Modiolar Classifier"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    return cfg_dir
 
 
 def _user_config_path() -> Path:
@@ -805,9 +806,9 @@ class App:
         ribbons_df, psds_df, positions_df = parse_group(g, self.cfg)
         ribbons_df = process_volume_df(ribbons_df)
         psds_df = process_volume_df(psds_df)
-        positions_df, _ = process_position_df(positions_df, self.cfg)
-        df = merge_dfs(ribbons_df, psds_df, positions_df)
-        df = self._ensure_required_objects_in_df(df, self.cfg, gid)
+        positions_df = process_position_df(positions_df, self.cfg)
+        df = merge_dfs(ribbons_df, psds_df, positions_df, self.cfg)
+        msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
         planes = build_planes(df, self.cfg)
         df = classify_synapses(df, self.cfg, planes)
         return df, planes
@@ -842,31 +843,17 @@ class App:
                     missing_msgs.append(f"{label} '{val}' not found in dataset.")
         if missing_msgs:
             raise RuntimeError("\n".join(missing_msgs))
-        obj_norm = df["object"].astype(str).map(_norm)
 
-        targets = set()
-        if not cfg.psds_only:
-            targets.add(_norm(cfg.ribbons_obj))
-        if not cfg.ribbons_only:
-            targets.add(_norm(cfg.psds_obj))
+        n_rib = len(df.loc[df["object"] == "Unclassified " + cfg.ribbons_obj])
+        n_psd = len(df.loc[df["object"] == "Unclassified " +
+                           cfg.psds_obj])
 
-        target_mask = obj_norm.isin(targets)
-        na_ihl = df["ihc_label"] == "nan"
-        bad_mask = target_mask & na_ihl
-        n_bad = int(bad_mask.sum())
-
-        if n_bad > 0:
-            n_rib = int(
-                (obj_norm.eq(_norm(cfg.ribbons_obj)) & bad_mask).sum())
-            n_psd = int((obj_norm.eq(_norm(cfg.psds_obj)) & bad_mask).sum())
-            self.log(
-                f"{n_rib} Unclassified ribbons and {n_psd} PSDs were excluded"
-            )
-            df.drop(index=df.index[bad_mask], inplace=True)
-        return df
+        msg = (f"{n_rib} ribbon(s) and {n_psd} PSD(s) were not "
+               f"allocated to any IHCs and are excluded from classification.")
+        return msg
 
     def _confirm_export_dir(self) -> Optional[Path]:
-        if self.w_export_dir.value:
+        if str(self.w_export_dir.value) != ".":
             return Path(self.w_export_dir.value)
         return prompt_export_dir()
 
@@ -909,36 +896,36 @@ class App:
                 self._progress_start(f"Opening {gid}…", total_steps)
                 df = self.df_cache[gid]
                 planes = build_planes(df, self.cfg)
-                self._progress_tick("Built planes")
-                df = self._ensure_required_objects_in_df(df, self.cfg, gid)
-                self._progress_tick("Verified objects")
+                self._progress_tick()
+                msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
+                self._progress_tick()
             else:
                 total_steps = 8
                 self._progress_start(f"Opening {gid}…", total_steps)
                 g = self.groups[gid]
                 ribbons_df, psds_df, positions_df = parse_group(g, self.cfg)
-                self._progress_tick("Parsed input files")
+                self._progress_tick()
                 ribbons_df = process_volume_df(ribbons_df)
-                self._progress_tick("Processed ribbon volumes")
+                self._progress_tick()
                 psds_df = process_volume_df(psds_df)
-                self._progress_tick("Processed PSD volumes")
-                positions_df, _ = process_position_df(positions_df, self.cfg)
-                self._progress_tick("Processed positions")
-                df = merge_dfs(ribbons_df, psds_df, positions_df)
-                self._progress_tick("Merged tables")
-                df = self._ensure_required_objects_in_df(df, self.cfg, gid)
-                self._progress_tick("Verified objects")
+                self._progress_tick()
+                positions_df = process_position_df(positions_df, self.cfg)
+                self._progress_tick()
+                df = merge_dfs(ribbons_df, psds_df, positions_df, self.cfg)
+                self._progress_tick()
+                msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
+                self._progress_tick(msg)
                 planes = build_planes(df, self.cfg)
-                self._progress_tick("Built planes")
+                self._progress_tick()
                 df = classify_synapses(df, self.cfg, planes)
-                self._progress_tick("Classified synapses")
+                self._progress_tick("Classified synapses.")
                 self.df_cache[gid] = df
         except Exception as e:
             self._progress_finish("Failed")
             self.log(f"[error] Could not build/verify dataset for '{gid}': {e}")
             return
         try:
-            self._progress_tick("Rendering viewer")
+            self._progress_tick("Rendering viewer...")
             self.current_viewer = self._open_viewer(df, planes)
             self._progress_finish("Done")
         except Exception as e:
@@ -979,6 +966,7 @@ class App:
             self.log("Select a group first.")
             return
         out_dir = self._confirm_export_dir()
+        self.w_export_dir.value = out_dir
         if not out_dir:
             self.log("Export cancelled (no folder selected).")
             return
@@ -988,7 +976,7 @@ class App:
             else:
                 df, _ = self._build_df_for_group(gid)
                 self.df_cache[gid] = df
-            df = self._ensure_required_objects_in_df(df, self.cfg, gid)
+            msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
         except Exception as e:
             self.log(f"[error] Cannot export '{gid}': {e}")
             return
@@ -1005,6 +993,7 @@ class App:
             self.log("No groups loaded.")
             return
         out_dir = self._confirm_export_dir()
+        self.w_export_dir.value = out_dir
         if not out_dir:
             self.log("Export cancelled (no folder selected).")
             return
@@ -1017,7 +1006,7 @@ class App:
                 else:
                     df, _ = self._build_df_for_group(gid)
                     self.df_cache[gid] = df
-                df = self._ensure_required_objects_in_df(df, self.cfg, gid)
+                msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
                 out_path = export_df_csv(df, gid, out_dir)
                 ok += 1
                 self.log(f"[{i}/{total}] Exported '{gid}' to {out_path}")

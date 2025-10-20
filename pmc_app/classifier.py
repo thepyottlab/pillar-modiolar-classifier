@@ -166,10 +166,8 @@ def classify_synapses(df: pd.DataFrame, cfg, planes=None) -> pd.DataFrame:
         )
 
         idx = out.index[pack["mask_syn"]]
-        # align by index to be safe
         out.loc[idx, "localization"] = pd.Series(loc_str, index=idx)
 
-        # distances
         P = out.loc[idx, ["pos_z", "pos_y", "pos_x"]].to_numpy(dtype=float)
         if len(P) == 0:
             continue
@@ -179,6 +177,5 @@ def classify_synapses(df: pd.DataFrame, cfg, planes=None) -> pd.DataFrame:
             d[i] = point_to_rect_distance(P[i], pack["a0"], pack["U"], pack["V"], pack["a"])
         out.loc[idx, "dist_to_plane"] = d
 
-    # final, pandas nullable string dtype
     out["localization"] = out["localization"].astype("string")
     return out
