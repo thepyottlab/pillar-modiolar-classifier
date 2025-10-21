@@ -20,7 +20,8 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
     """
     out_cols = ["id", "ihc_label", "object", "object_id", "volume"]
 
-    set_cols = [c for c in df.columns if isinstance(c, str) and c.startswith("Set ")]
+    set_cols = sorted((c for c in df.columns if isinstance(c, str) and c.startswith("Set ")),
+                  key=lambda c: int(c.split(' ', 1)[1]))
 
     if len(set_cols) == 0 or len(df) == 0:
         existing = [c for c in out_cols if c in df.columns]
