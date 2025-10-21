@@ -22,7 +22,9 @@ def _safe_grouplabel(gid: str) -> str:
 
 
 def export_df_csv(df: pd.DataFrame, gid: str, out_dir: Path) -> Path:
-    """Write CSV for a group as '<gid>_classified.csv'."""
+    """Write CSV for a group as '<gid>_classified.csv' and replace 'nan' by
+    empty spaces."""
+    df = df.replace('nan', '')
     out_dir.mkdir(parents=True, exist_ok=True)
     fname = f"{_safe_grouplabel(gid)}_classified.csv"
     path = out_dir / fname
