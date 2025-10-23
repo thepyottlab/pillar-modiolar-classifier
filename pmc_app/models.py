@@ -36,9 +36,9 @@ class FinderConfig:
     """
 
     folder: Path
-    ribbons: str = "ribbon"
+    ribbons: str = "rib"
     psds: str = "psd"
-    positions: str = "sum"
+    positions: str = "pos"
     extensions: str = ".xls"
     ribbons_obj: str = "ribbons"
     psds_obj: str = "PSDs"
