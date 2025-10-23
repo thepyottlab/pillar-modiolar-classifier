@@ -10,7 +10,6 @@ assets resolved from the installed package.
 
 import configparser
 import os
-import sys
 from dataclasses import asdict
 from datetime import datetime
 from importlib.resources import files
@@ -34,7 +33,7 @@ from qtpy.QtGui import QIcon, QPainter, QColor, QFontMetrics
 from qtpy.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QSizePolicy, QStyleOptionProgressBar, QStyle, QProgressBar
 from qtpy.QtCore import QCoreApplication
 
-from .classifier import build_planes, classify_synapses
+from .classifier import identify_poles, build_planes, classify_synapses
 from .exporter import prompt_export_dir, export_df_csv
 from .finder import find_groups
 from .models import FinderConfig, Group
@@ -809,6 +808,7 @@ class App:
         positions_df = process_position_df(positions_df, self.cfg)
         df = merge_dfs(ribbons_df, psds_df, positions_df, self.cfg)
         msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
+        df = identify_poles(df, self.cfg)
         planes = build_planes(df, self.cfg)
         df = classify_synapses(df, self.cfg, planes)
         return df, planes
@@ -895,6 +895,7 @@ class App:
                 total_steps = 3
                 self._progress_start(f"Opening {gid}…", total_steps)
                 df = self.df_cache[gid]
+                df = identify_poles(df, self.cfg)
                 planes = build_planes(df, self.cfg)
                 self._progress_tick()
                 msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
@@ -915,6 +916,7 @@ class App:
                 self._progress_tick()
                 msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
                 self._progress_tick(msg)
+                df = identify_poles(df, self.cfg)
                 planes = build_planes(df, self.cfg)
                 self._progress_tick()
                 df = classify_synapses(df, self.cfg, planes)

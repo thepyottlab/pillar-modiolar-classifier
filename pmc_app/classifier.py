@@ -4,6 +4,51 @@ import numpy as np
 import pandas as pd
 
 
+def identify_poles(df: pd.DataFrame, cfg) -> pd.DataFrame:
+    """
+    Identify which of the two anchor points ('apical'/'basal') per IHC label is
+    closer to the majority of synapses (cfg.ribbons_obj + cfg.psds_obj) and
+    relabel accordingly: the anchor with more synapses closer to it becomes
+    'basal' and the other becomes 'apical'.
+    """
+    out = df.copy()
+    ribbons = cfg.ribbons_obj
+    psds = cfg.psds_obj
+
+    anchors = out[out["object"].isin(["apical", "basal"])]
+    have_both = (
+        anchors.groupby("ihc_label")["object"]
+        .nunique()
+        .loc[lambda s: s >= 2]
+        .index
+    )
+
+    for label in have_both:
+        ap_mask = (out["ihc_label"] == label) & (out["object"] == "apical")
+        ba_mask = (out["ihc_label"] == label) & (out["object"] == "basal")
+        ap = out[ap_mask].iloc[0]
+        ba = out[ba_mask].iloc[0]
+
+        ap_xyz = np.array([float(ap["pos_x"]), float(ap["pos_y"]), float(ap["pos_z"])], dtype=float)
+        ba_xyz = np.array([float(ba["pos_x"]), float(ba["pos_y"]), float(ba["pos_z"])], dtype=float)
+
+        syn_mask = (out["ihc_label"] == label) & (out["object"].isin([ribbons, psds]))
+        gxyz = out.loc[syn_mask, ["pos_x", "pos_y", "pos_z"]].to_numpy(dtype=float)
+
+        d_ap2 = ((gxyz - ap_xyz) ** 2).sum(axis=1)
+        d_ba2 = ((gxyz - ba_xyz) ** 2).sum(axis=1)
+
+        closer_ap = (d_ap2 < d_ba2).sum()
+        closer_ba = (d_ba2 < d_ap2).sum()
+
+        if closer_ap > closer_ba:
+            out.loc[ap_mask, "object"] = "basal"
+            out.loc[ba_mask, "object"] = "apical"
+        elif closer_ba > closer_ap:
+            out.loc[ap_mask, "object"] = "apical"
+            out.loc[ba_mask, "object"] = "basal"
+    return out
+
 def build_planes(df: pd.DataFrame, cfg) -> list[np.ndarray]:
     """Build finite rectangles (planes) per IHC label using apical/basal anchors."""
     ab = df[df["object"].isin(["apical", "basal"])][["ihc_label", "object"]]
