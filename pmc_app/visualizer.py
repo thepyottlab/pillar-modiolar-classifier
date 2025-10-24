@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 """
-Visualization module for Pillar–Modiolar Classifier.
+Visualization for Pillar–Modiolar (PM) and Habenular-Cuticular (HC) planes.
 
-Builds the Napari scene: points, planes, distance vectors, labels, and a dock
-panel for interactive recoloring and per-IHC selection.
+Renders:
+  - points (ribbons, PSDs, anchors),
+  - PM planes (one per IHC) + distance vectors/labels,
+  - HC planes (perpendicular to PM, anchored at basal) + distance 
+  vectors/labels,
+  - UI dock for quick per-IHC filtering and pillar/modiolar highlighting.
 """
 
 import warnings
@@ -46,20 +50,18 @@ def _cleanup_viewer(viewer: napari.Viewer):
         pass
 
 
-def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = None):
+def draw_objects(df: pd.DataFrame, cfg, pm_bundle, hc_bundle=None, viewer: napari.Viewer | None = None):
     """
-    Render the dataset into a Napari viewer with interactive controls.
-    If an existing viewer is provided, it will be cleared and redrawn in-place.
+    Render dataset and both plane systems into a Napari viewer.
 
     Args:
-        df: Unified dataframe containing positions, volumes, classifications.
-        cfg: FinderConfig-like object with ribbons/psds/anchor object names.
-        planes: List of per-IHC finite rectangles in ZYX coords.
-        viewer: Optional existing napari.Viewer to reuse.
-
-    Returns:
-        A configured Napari viewer instance.
+        df: unified dataframe (points, volumes, classification, distances).
+        cfg: FinderConfig-like object.
+        pm_bundle: (pm_planes, pm_labels) — list of 4×3 ZYX rectangles + matching labels.
+        hc_bundle: (hc_planes, hc_labels) — list of 4×3 ZYX rectangles + matching labels.
+        viewer: optional napari.Viewer to reuse.
     """
+    # ---------- viewer setup ----------
     if viewer is None:
         viewer = napari.Viewer(ndisplay=3)
     else:
@@ -69,28 +71,33 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
             pass
         _cleanup_viewer(viewer)
 
+    # Unpack bundles (use provided labels directly — 1:1 mapping to polygons)
+    if pm_bundle is None:
+        pm_planes, pm_labels = [], []
+    else:
+        pm_planes, pm_labels = pm_bundle
+
+    if hc_bundle is None:
+        hc_planes, hc_labels = [], []
+    else:
+        hc_planes, hc_labels = hc_bundle
+
+    # Deduplicate label→index maps (first polygon per label wins)
+    pm_label_to_idx: dict[str, int] = {}
+    for i, l in enumerate(pm_labels):
+        k = str(l).strip()
+        if k and k not in pm_label_to_idx:
+            pm_label_to_idx[k] = i
+
+    hc_label_to_idx: dict[str, int] = {}
+    for i, l in enumerate(hc_labels):
+        k = str(l).strip()
+        if k and k not in hc_label_to_idx:
+            hc_label_to_idx[k] = i
+
     ribbons, psds = cfg.ribbons_obj, cfg.psds_obj
 
-    max_vol_ribbon = df.loc[df["object"] == ribbons, "volume"].astype(float).max()
-    max_vol_psd = df.loc[df["object"] == psds, "volume"].astype(float).max()
-    if not np.isfinite(max_vol_ribbon):
-        max_vol_ribbon = 1.0
-    if not np.isfinite(max_vol_psd):
-        max_vol_psd = 1.0
-
-    def hex_to_rgba(h: str) -> np.ndarray:
-        h = h.lstrip("#")
-        r, g, b = int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255
-        a = int(h[6:8], 16) / 255 if len(h) == 8 else 1.0
-        return np.array([r, g, b, a], np.float32)
-
-    def solid(n: int, hex_color: str) -> np.ndarray:
-        return np.tile(hex_to_rgba(hex_color), (n, 1))
-
-    COL_RIBBON, COL_PSD = "#CB2027", "#059748"
-    COL_PILLAR, COL_MODIOLAR, COL_GRAY, COL_DEFAULT = "#9D722A", "#7B3A96", "#8C8C8C", "#FFFFFF"
-    COL_WHITE, COL_YELLOW = "#FFFFFF", "#FFFF00"
-
+    # ---------- scene bounds / box ----------
     coords = df[["pos_z", "pos_y", "pos_x"]].to_numpy(float)
     (zmin, ymin, xmin), (zmax, ymax, xmax) = coords.min(0), coords.max(0)
     xc, yc = (xmin + xmax) / 2.0, (ymin + ymax) / 2.0
@@ -117,55 +124,58 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
         box_edges, shape_type="path", edge_width=0.1, opacity=0.15, edge_color="white", name="Bounding box"
     )
 
-    ab = df[df["object"].isin(["apical", "basal"])][["ihc_label", "object"]]
-    matched = set(ab.groupby("ihc_label")["object"].nunique().loc[lambda s: s >= 2].index)
+    # ---------- color helpers ----------
+    def hex_to_rgba(h: str) -> np.ndarray:
+        h = h.lstrip("#")
+        r, g, b = int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255
+        a = int(h[6:8], 16) / 255 if len(h) == 8 else 1.0
+        return np.array([r, g, b, a], np.float32)
 
-    label_info = {}
-    for lab in matched:
-        ap = df[(df["ihc_label"] == lab) & (df["object"] == "apical")].iloc[0]
-        ba = df[(df["ihc_label"] == lab) & (df["object"] == "basal")].iloc[0]
-        k = str(lab).strip()
-        label_info[k] = {
-            "ap": np.array([float(ap["pos_z"]), float(ap["pos_y"]), float(ap["pos_x"])]),
-            "ba": np.array([float(ba["pos_z"]), float(ba["pos_y"]), float(ba["pos_x"])]),
-        }
+    def solid(n: int, hex_color: str) -> np.ndarray:
+        return np.tile(hex_to_rgba(hex_color), (n, 1))
 
-    tol = 1e-6
-    label_to_plane_idx, used = {}, set()
-    for k, rec in label_info.items():
-        apz, baz = rec["ap"][0], rec["ba"][0]
-        best_i, best_d = None, np.inf
-        for i, poly in enumerate(planes):
-            if i in used:
-                continue
-            zuniq = np.unique(poly[:, 0])
-            if len(zuniq) != 2:
-                continue
-            ok = (abs(zuniq[0] - apz) < tol and abs(zuniq[1] - baz) < tol) or (
-                abs(zuniq[1] - apz) < tol and abs(zuniq[0] - baz) < tol
-            )
-            if not ok:
-                continue
-            d = np.linalg.norm(poly[np.isclose(poly[:, 0], apz, atol=tol)] - rec["ap"], axis=1).min()
-            if d < best_d:
-                best_d, best_i = d, i
-        label_to_plane_idx[k] = best_i
-        if best_i is not None:
-            used.add(best_i)
+    COL_RIBBON, COL_PSD = "#CB2027", "#059748"
+    COL_PILLAR, COL_MODIOLAR, COL_GRAY, COL_DEFAULT = "#9D722A", "#7B3A96", "#8C8C8C", "#FFFFFF"
+    COL_WHITE, COL_YELLOW = "#FFFFFF", "#FFFF00"
 
+    # ---------- label list / selection ----------
+    labels = sorted(
+        [s for s in df["ihc_label"].dropna().astype(str).str.strip().unique()
+         if s.lower() not in {"nan", "none", ""}]
+    )
+
+    # ---------- volumes for sizing ----------
+    max_vol_ribbon = df.loc[df["object"] == ribbons, "volume"].astype(float).max()
+    max_vol_psd = df.loc[df["object"] == psds, "volume"].astype(float).max()
+    if not np.isfinite(max_vol_ribbon):
+        max_vol_ribbon = 1.0
+    if not np.isfinite(max_vol_psd):
+        max_vol_psd = 1.0
+
+    # ---------- normals ----------
     def plane_normal(poly: np.ndarray):
         a0 = poly[0]
         U = poly[2] - poly[0]
         V = poly[1] - poly[0]
         n = np.cross(U, V)
-        return n / np.linalg.norm(n), a0
+        nn = np.linalg.norm(n)
+        if nn == 0:
+            return np.array([0.0, 0.0, 1.0], float), a0  # harmless fallback
+        return n / nn, a0
 
-    def plane_normal_for_label(lab_str: str):
-        i = label_to_plane_idx.get(lab_str)
-        if i is None:
+    def pm_normal_for_label(lab_str: str):
+        i = pm_label_to_idx.get(lab_str)
+        if i is None or i >= len(pm_planes):
             return None
-        return plane_normal(planes[i])
+        return plane_normal(pm_planes[i])
 
+    def hc_normal_for_label(lab_str: str):
+        i = hc_label_to_idx.get(lab_str)
+        if i is None or i >= len(hc_planes):
+            return None
+        return plane_normal(hc_planes[i])
+
+    # ---------- UI toggles ----------
     cb_pil_rib = CheckBox(text="Highlight pillar ribbons", value=False)
     cb_mod_rib = CheckBox(text="Highlight modiolar ribbons", value=False)
     cb_pil_psd = CheckBox(text="Highlight pillar PSDs", value=False)
@@ -180,6 +190,7 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
     if show_psd:
         toggle_widgets += [cb_pil_psd, cb_mod_psd]
 
+    # ---------- color/size per object ----------
     def colors_for_rows(rows: pd.DataFrame, obj: str) -> np.ndarray:
         n = len(rows)
         if obj == ribbons:
@@ -213,6 +224,7 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
             return 2
         return 1
 
+    # ---------- layer helpers ----------
     def update_points(layer, pts, sizes, colors):
         with layer.events.blocker_all():
             layer.data = pts
@@ -233,7 +245,7 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
             layer.data = data
         layer.refresh()
 
-    def update_label_points(layer, pos3, labels):
+    def update_label_points(layer, pos3, labels_txt):
         if layer is None:
             return
         pos3 = np.asarray(pos3, float)
@@ -242,12 +254,12 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
         elif pos3.ndim != 2 or (pos3.size > 0 and pos3.shape[1] != 3):
             pos3 = np.zeros((0, 3), float)
         n = int(pos3.shape[0])
-        if labels is None:
+        if labels_txt is None:
             lab = [""] * n
         else:
             lab = [
                 "" if (x is None or (isinstance(x, float) and not np.isfinite(x))) else str(x)
-                for x in labels
+                for x in labels_txt
             ]
             if len(lab) != n:
                 lab = lab[:n] if len(lab) > n else lab + [""] * (n - len(lab))
@@ -270,50 +282,61 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
                 pass
         layer.refresh()
 
+    # ---------- track user visibility ----------
     point_layers, user_vis, vis_prog = {}, {}, False
 
     def bind_user_vis(layer, key: str):
         if layer is None:
             return
+
         def _on_visible_change(event=None, _k=key, _layer=layer):
             nonlocal vis_prog
             if vis_prog:
                 return
             user_vis[_k] = bool(_layer.visible)
+
         layer.events.visible.connect(_on_visible_change)
 
-    plane_layer = viewer.add_shapes(
-        planes,
+    # ---------- plane layers ----------
+    pm_layer = viewer.add_shapes(
+        pm_planes,
         shape_type="rectangle",
         edge_width=1,
         edge_color="transparent",
-        face_color="white",
+        face_color="#7a7a7aff",
         blending="translucent_no_depth",
         opacity=0.25,
-        name="Pillar-modiolar planes",
+        name="Habenular-cuticular axes",
         visible=True,
     )
-    user_vis["__planes__"] = bool(plane_layer.visible)
-    bind_user_vis(plane_layer, "__planes__")
+    bind_user_vis(pm_layer, "__pm_planes__")
+    user_vis["__pm_planes__"] = True
 
-    distance_paths_ribbons = None
-    distance_labels_ribbons = None
-    distance_paths_psds = None
-    distance_labels_psds = None
+    hc_layer = viewer.add_shapes(
+        hc_planes,
+        shape_type="rectangle",
+        edge_width=1,
+        edge_color="transparent",
+        face_color="#7a7a7aff",
+        blending="translucent_no_depth",
+        opacity=0.20,
+        name="Pillar-modiolar axes",
+        visible=True,
+    )
+    bind_user_vis(hc_layer, "__hc_planes__")
+    user_vis["__hc_planes__"] = True
 
-    if show_rib:
-        distance_paths_ribbons = viewer.add_vectors(
-            np.zeros((0, 2, 3), float),
-            name="Distance paths ribbons",
-            edge_width=0.2,
-            edge_color="white",
-            opacity=0.4,
-            vector_style="triangle",
-            blending="translucent_no_depth",
-            visible=False,
-        )
-        dz_text = -0.015 * max(1e-9, (zmax - zmin))
-        label_text_cfg_r = {
+    # ---------- distance vectors / labels ----------
+    # PM
+    distance_paths_ribbons_pm = distance_labels_ribbons_pm = None
+    distance_paths_psds_pm = distance_labels_psds_pm = None
+    # HC
+    distance_paths_ribbons_hc = distance_labels_ribbons_hc = None
+    distance_paths_psds_hc = distance_labels_psds_hc = None
+
+    dz_text = -0.015 * max(1e-9, (zmax - zmin))
+    def make_label_cfg():
+        return {
             "string": "{label}",
             "size": 0.3,
             "color": "white",
@@ -321,110 +344,90 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
             "translation": np.array([0.0, dz_text, 0.0], float),
             "scaling": True,
         }
-        distance_labels_ribbons = viewer.add_points(
-            np.zeros((0, 3), float),
-            name="Distance labels ribbons",
-            size=0.001,
-            face_color="transparent",
-            border_color="transparent",
-            opacity=1.0,
-            visible=False,
-            features=pd.DataFrame({"label": []}),
-            text=label_text_cfg_r,
+
+    if show_rib:
+        distance_paths_ribbons_pm = viewer.add_vectors(
+            np.zeros((0, 2, 3), float), name="PM distance vectors (ribbons)",
+            edge_width=0.2, edge_color="white", opacity=0.4,
+            vector_style="triangle", blending="translucent_no_depth", visible=False,
+        )
+        distance_labels_ribbons_pm = viewer.add_points(
+            np.zeros((0, 3), float), name="PM distance labels (ribbons)",
+            size=0.001, face_color="transparent", border_color="transparent",
+            opacity=1.0, visible=False, features=pd.DataFrame({"label": []}), text=make_label_cfg(),
+        )
+        distance_paths_ribbons_hc = viewer.add_vectors(
+            np.zeros((0, 2, 3), float), name="HC distance vectors (ribbons)",
+            edge_width=0.2, edge_color="white", opacity=0.4,
+            vector_style="triangle", blending="translucent_no_depth", visible=False,
+        )
+        distance_labels_ribbons_hc = viewer.add_points(
+            np.zeros((0, 3), float), name="HC distance labels (ribbons)",
+            size=0.001, face_color="transparent", border_color="transparent",
+            opacity=1.0, visible=False, features=pd.DataFrame({"label": []}), text=make_label_cfg(),
         )
 
     if show_psd:
-        distance_paths_psds = viewer.add_vectors(
-            np.zeros((0, 2, 3), float),
-            name="Distance paths psds",
-            edge_width=0.2,
-            edge_color="white",
-            opacity=0.4,
-            vector_style="triangle",
-            blending="translucent_no_depth",
-            visible=False,
+        distance_paths_psds_pm = viewer.add_vectors(
+            np.zeros((0, 2, 3), float), name="PM distance vectors (PSDs)",
+            edge_width=0.2, edge_color="white", opacity=0.4,
+            vector_style="triangle", blending="translucent_no_depth", visible=False,
         )
-        dz_text = -0.015 * max(1e-9, (zmax - zmin))
-        label_text_cfg_p = {
-            "string": "{label}",
-            "size": 0.3,
-            "color": "white",
-            "anchor": "center",
-            "translation": np.array([0.0, dz_text, 0.0], float),
-            "scaling": True,
-        }
-        distance_labels_psds = viewer.add_points(
-            np.zeros((0, 3), float),
-            name="Distance labels psds",
-            size=0.001,
-            face_color="transparent",
-            border_color="transparent",
-            opacity=1.0,
-            visible=False,
-            features=pd.DataFrame({"label": []}),
-            text=label_text_cfg_p,
+        distance_labels_psds_pm = viewer.add_points(
+            np.zeros((0, 3), float), name="PM distance labels (PSDs)",
+            size=0.001, face_color="transparent", border_color="transparent",
+            opacity=1.0, visible=False, features=pd.DataFrame({"label": []}), text=make_label_cfg(),
+        )
+        distance_paths_psds_hc = viewer.add_vectors(
+            np.zeros((0, 2, 3), float), name="HC distance vectors (PSDs)",
+            edge_width=0.2, edge_color="white", opacity=0.4,
+            vector_style="triangle", blending="translucent_no_depth", visible=False,
+        )
+        distance_labels_psds_hc = viewer.add_points(
+            np.zeros((0, 3), float), name="HC distance labels (PSDs)",
+            size=0.001, face_color="transparent", border_color="transparent",
+            opacity=1.0, visible=False, features=pd.DataFrame({"label": []}), text=make_label_cfg(),
         )
 
-    if distance_paths_ribbons is not None:
-        user_vis["__vec_ribbons__"] = False
-    if distance_paths_psds is not None:
-        user_vis["__vec_psds__"] = False
-    if distance_labels_ribbons is not None:
-        user_vis["__lbl_ribbons__"] = False
-    if distance_labels_psds is not None:
-        user_vis["__lbl_psds__"] = False
+    for key in ["__pm_vec_r__", "__pm_lbl_r__", "__pm_vec_p__", "__pm_lbl_p__",
+                "__hc_vec_r__", "__hc_lbl_r__", "__hc_vec_p__", "__hc_lbl_p__"]:
+        user_vis[key] = False
 
-    bind_user_vis(distance_paths_ribbons, "__vec_ribbons__")
-    bind_user_vis(distance_paths_psds, "__vec_psds__")
-    bind_user_vis(distance_labels_ribbons, "__lbl_ribbons__")
-    bind_user_vis(distance_labels_psds, "__lbl_psds__")
+    bind_user_vis(distance_paths_ribbons_pm, "__pm_vec_r__")
+    bind_user_vis(distance_labels_ribbons_pm, "__pm_lbl_r__")
+    bind_user_vis(distance_paths_psds_pm, "__pm_vec_p__")
+    bind_user_vis(distance_labels_psds_pm, "__pm_lbl_p__")
+    bind_user_vis(distance_paths_ribbons_hc, "__hc_vec_r__")
+    bind_user_vis(distance_labels_ribbons_hc, "__hc_lbl_r__")
+    bind_user_vis(distance_paths_psds_hc, "__hc_vec_p__")
+    bind_user_vis(distance_labels_psds_hc, "__hc_lbl_p__")
 
+    # ---------- points ----------
     for obj in [o for o in df["object"].unique()]:
         rows = df[df["object"] == obj]
         pts = rows[["pos_z", "pos_y", "pos_x"]].to_numpy(float)
         base = base_size_for(obj)
         if obj == ribbons:
-            sizes = base * (rows["volume"].astype(
-                float).to_numpy() / max_vol_ribbon)
+            sizes = base * (rows["volume"].astype(float).to_numpy() / max_vol_ribbon)
         elif obj == psds:
-            sizes = base * (
-                        rows["volume"].astype(float).to_numpy() / max_vol_psd)
+            sizes = base * (rows["volume"].astype(float).to_numpy() / max_vol_psd)
         else:
             sizes = base
         colors = colors_for_rows(rows, obj)
 
-        _allowed_visible = {
-            cfg.ribbons_obj,
-            cfg.psds_obj,
-            cfg.pillar_obj,
-            cfg.modiolar_obj,
-            "apical",
-            "basal",
-        }
+        _allowed_visible = {cfg.ribbons_obj, cfg.psds_obj, cfg.pillar_obj, cfg.modiolar_obj, "apical", "basal"}
         _initial_visible = obj in _allowed_visible
 
         layer = viewer.add_points(
-            pts,
-            size=sizes,
-            border_color=colors,
-            face_color=colors,
-            name=str(obj),
-            blending="translucent",
-            visible=_initial_visible,
+            pts, size=sizes, border_color=colors, face_color=colors, name=str(obj),
+            blending="translucent", visible=_initial_visible,
         )
         layer.metadata["object"] = obj
         point_layers[obj] = layer
-        user_vis[
-            obj] = _initial_visible
+        user_vis[obj] = _initial_visible
         bind_user_vis(layer, obj)
 
-    labels = sorted(
-        [
-            s
-            for s in df["ihc_label"].dropna().astype(str).str.strip().unique()
-            if s.lower() not in {"nan", "none", ""}
-        ]
-    )
+    # ---------- selection UI ----------
     checks = {lab: CheckBox(text=lab, value=True) for lab in labels}
     btn_all_on, btn_all_off = PushButton(text="Show all"), PushButton(text="Hide all")
 
@@ -442,35 +445,41 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
     max_range = float(max(zmax - zmin, ymax - ymin, xmax - xmin))
     d_eps = 1e-6 * max_range if np.isfinite(max_range) and max_range > 0 else 1e-6
 
-    def build_distance_for(obj_name: str, sel_labels):
+    # Build distance vectors for a given plane family and distance column
+    def build_distance_for(obj_name: str, sel_labels, dist_col: str, normal_getter):
         mask = (df["object"] == obj_name) & (df["ihc_label"].astype(str).isin(sel_labels))
         rows = df.loc[mask]
         if rows.empty:
             return np.zeros((0, 2, 3), float), np.zeros((0, 3), float), []
+
+        # Precompute normals/anchors per selected label
         normals = {}
         for lab in rows["ihc_label"].astype(str).unique():
-            pn = plane_normal_for_label(lab)
-            if pn is not None:
-                normals[lab] = pn
+            normals[lab] = normal_getter(lab)
+
         vec_list, mids, txt = [], [], []
         for _, r in rows.iterrows():
             key = str(r["ihc_label"]).strip()
-            if key not in normals:
+            pn = normals.get(key)
+            if pn is None:
                 continue
-            n_hat, a0 = normals[key]
+            n_hat, a0 = pn  # a0 unused now; kept for API symmetry
             if not np.all(np.isfinite(n_hat)):
                 continue
+
             P = np.array([float(r["pos_z"]), float(r["pos_y"]), float(r["pos_x"])], float)
-            d = float(r["dist_to_plane"])
+            d = float(r.get(dist_col, np.nan))
             if not np.isfinite(d) or abs(d) < d_eps:
                 continue
-            sgn = np.sign(np.dot(P - a0, n_hat)) or 1.0
-            V = -sgn * d * n_hat
+
+            V = -d * n_hat
             if not np.all(np.isfinite(V)) or np.linalg.norm(V) < d_eps:
                 continue
+
             vec_list.append(np.stack([P, V], 0))
             mids.append(P + 0.5 * V)
             txt.append(f"{d:.2f}")
+
         if len(vec_list) == 0:
             return np.zeros((0, 2, 3), float), np.zeros((0, 3), float), []
         return np.stack(vec_list, 0), np.vstack(mids), txt
@@ -481,44 +490,58 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
     def selected_labels_now():
         return [lab for lab, cb in checks.items() if cb.value]
 
-    plane_last_nonempty_data = list(planes)
-
     def update_view(selected):
-        nonlocal vis_prog, plane_last_nonempty_data
+        nonlocal vis_prog
+
         EMPTY_VEC = np.zeros((0, 2, 3), float)
         EMPTY_PTS = np.zeros((0, 3), float)
         EMPTY_TXT = []
+
         if not selected:
             df_points = df[unlabeled_mask]
-            idxs = []
-            vec_r, mid_r, txt_r = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
-            vec_p, mid_p, txt_p = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
+            idxs_pm, idxs_hc = [], []
+            vec_r_pm, mid_r_pm, txt_r_pm = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
+            vec_p_pm, mid_p_pm, txt_p_pm = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
+            vec_r_hc, mid_r_hc, txt_r_hc = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
+            vec_p_hc, mid_p_hc, txt_p_hc = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
         else:
-            labeled = df[
-                ~unlabeled_mask & df["ihc_label"].astype(str).str.strip().isin(selected)
-            ]
+            labeled = df[~unlabeled_mask & df["ihc_label"].astype(str).str.strip().isin(selected)]
             df_points = pd.concat([labeled, df[unlabeled_mask]], ignore_index=True)
-            idxs = [
-                label_to_plane_idx[l]
-                for l in selected
-                if (l in label_to_plane_idx and label_to_plane_idx[l] is not None)
-            ]
-            if idxs:
-                new_data = [planes[i] for i in idxs]
-                update_shapes(plane_layer, new_data)
-                plane_last_nonempty_data = new_data
-            if show_rib:
-                vec_r, mid_r, txt_r = build_distance_for(ribbons, selected)
-            else:
-                vec_r, mid_r, txt_r = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
-            if show_psd:
-                vec_p, mid_p, txt_p = build_distance_for(psds, selected)
-            else:
-                vec_p, mid_p, txt_p = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
+
+            # Select planes by label directly from bundles
+            idxs_pm = [pm_label_to_idx[l] for l in selected if l in pm_label_to_idx]
+            idxs_hc = [hc_label_to_idx[l] for l in selected if l in hc_label_to_idx]
+
+            if idxs_pm:
+                update_shapes(pm_layer, [pm_planes[i] for i in idxs_pm])
+            if idxs_hc:
+                update_shapes(hc_layer, [hc_planes[i] for i in idxs_hc])
+
+            # Build vectors/labels for both families
+            vec_r_pm, mid_r_pm, txt_r_pm = (
+                build_distance_for(ribbons, selected, "pillar_modiolar_axis", pm_normal_for_label)
+                if show_rib else (EMPTY_VEC, EMPTY_PTS, EMPTY_TXT)
+            )
+            vec_p_pm, mid_p_pm, txt_p_pm = (
+                build_distance_for(psds, selected, "pillar_modiolar_axis", pm_normal_for_label)
+                if show_psd else (EMPTY_VEC, EMPTY_PTS, EMPTY_TXT)
+            )
+            vec_r_hc, mid_r_hc, txt_r_hc = (
+                build_distance_for(ribbons, selected, "habenular_cuticular_axis", hc_normal_for_label)
+                if show_rib else (EMPTY_VEC, EMPTY_PTS, EMPTY_TXT)
+            )
+            vec_p_hc, mid_p_hc, txt_p_hc = (
+                build_distance_for(psds, selected, "habenular_cuticular_axis", hc_normal_for_label)
+                if show_psd else (EMPTY_VEC, EMPTY_PTS, EMPTY_TXT)
+            )
+
+        # Plane layer visibility = user's choice AND selection has planes
         vis_prog = True
-        desired_plane_vis = bool(user_vis.get("__planes__", True)) and bool(selected) and bool(idxs)
-        plane_layer.visible = desired_plane_vis
+        pm_layer.visible = bool(user_vis.get("__pm_planes__", True) and bool(idxs_pm))
+        hc_layer.visible = bool(user_vis.get("__hc_planes__", True) and bool(idxs_hc))
         vis_prog = False
+
+        # Points
         for obj, layer in point_layers_order:
             sel = df_points[df_points["object"] == obj]
             n = len(sel)
@@ -545,26 +568,46 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
             vis_prog = True
             layer.visible = bool(user_vis.get(obj, True) and (n > 0))
             vis_prog = False
-        update_vectors(distance_paths_ribbons, vec_r)
-        update_vectors(distance_paths_psds, vec_p)
-        update_label_points(distance_labels_ribbons, mid_r, txt_r)
-        update_label_points(distance_labels_psds, mid_p, txt_p)
-        has_r = len(vec_r) > 0
-        has_p = len(vec_p) > 0
+
+        # Vector/label data updates
+        update_vectors(distance_paths_ribbons_pm, vec_r_pm)
+        update_vectors(distance_paths_psds_pm, vec_p_pm)
+        update_vectors(distance_paths_ribbons_hc, vec_r_hc)
+        update_vectors(distance_paths_psds_hc, vec_p_hc)
+
+        update_label_points(distance_labels_ribbons_pm, mid_r_pm, txt_r_pm)
+        update_label_points(distance_labels_psds_pm, mid_p_pm, txt_p_pm)
+        update_label_points(distance_labels_ribbons_hc, mid_r_hc, txt_r_hc)
+        update_label_points(distance_labels_psds_hc, mid_p_hc, txt_p_hc)
+
+        has_r_pm = len(vec_r_pm) > 0
+        has_p_pm = len(vec_p_pm) > 0
+        has_r_hc = len(vec_r_hc) > 0
+        has_p_hc = len(vec_p_hc) > 0
+
         vis_prog = True
-        if distance_paths_ribbons is not None:
-            distance_paths_ribbons.visible = bool(user_vis.get("__vec_ribbons__", False) and has_r)
-        if distance_labels_ribbons is not None:
-            distance_labels_ribbons.visible = bool(user_vis.get("__lbl_ribbons__", False) and has_r)
-        if distance_paths_psds is not None:
-            distance_paths_psds.visible = bool(user_vis.get("__vec_psds__", False) and has_p)
-        if distance_labels_psds is not None:
-            distance_labels_psds.visible = bool(user_vis.get("__lbl_psds__", False) and has_p)
+        if distance_paths_ribbons_pm is not None:
+            distance_paths_ribbons_pm.visible = bool(user_vis.get("__pm_vec_r__", False) and has_r_pm)
+        if distance_labels_ribbons_pm is not None:
+            distance_labels_ribbons_pm.visible = bool(user_vis.get("__pm_lbl_r__", False) and has_r_pm)
+        if distance_paths_psds_pm is not None:
+            distance_paths_psds_pm.visible = bool(user_vis.get("__pm_vec_p__", False) and has_p_pm)
+        if distance_labels_psds_pm is not None:
+            distance_labels_psds_pm.visible = bool(user_vis.get("__pm_lbl_p__", False) and has_p_pm)
+
+        if distance_paths_ribbons_hc is not None:
+            distance_paths_ribbons_hc.visible = bool(user_vis.get("__hc_vec_r__", False) and has_r_hc)
+        if distance_labels_ribbons_hc is not None:
+            distance_labels_ribbons_hc.visible = bool(user_vis.get("__hc_lbl_r__", False) and has_r_hc)
+        if distance_paths_psds_hc is not None:
+            distance_paths_psds_hc.visible = bool(user_vis.get("__hc_vec_p__", False) and has_p_hc)
+        if distance_labels_psds_hc is not None:
+            distance_labels_psds_hc.visible = bool(user_vis.get("__hc_lbl_p__", False) and has_p_hc)
         vis_prog = False
 
     def apply():
         if not batching:
-            update_view(selected_labels_now())
+            update_view([lab for lab, cb in checks.items() if cb.value])
 
     for cb in checks.values():
         cb.changed.connect(apply)
@@ -581,11 +624,13 @@ def draw_objects(df: pd.DataFrame, cfg, planes, viewer: napari.Viewer | None = N
         for cb in checks.values():
             cb.value = val
         batching = False
-        update_view(selected_labels_now())
+        apply()
 
     btn_all_on.clicked.connect(lambda: set_all(True))
     btn_all_off.clicked.connect(lambda: set_all(False))
 
-    update_view(labels)
+    # Initial draw
+    apply()
     viewer.fit_to_view()
     return viewer
+

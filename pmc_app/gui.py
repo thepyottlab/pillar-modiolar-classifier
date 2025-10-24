@@ -33,7 +33,7 @@ from qtpy.QtGui import QIcon, QPainter, QColor, QFontMetrics
 from qtpy.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QSizePolicy, QStyleOptionProgressBar, QStyle, QProgressBar
 from qtpy.QtCore import QCoreApplication
 
-from .classifier import identify_poles, build_planes, classify_synapses
+from .classifier import identify_poles, build_pm_planes, build_hc_planes, classify_synapses
 from .exporter import prompt_export_dir, export_df_csv
 from .finder import find_groups
 from .models import FinderConfig, Group
@@ -808,10 +808,16 @@ class App:
         positions_df = process_position_df(positions_df, self.cfg)
         df = merge_dfs(ribbons_df, psds_df, positions_df, self.cfg)
         msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
+
         df = identify_poles(df, self.cfg)
-        planes = build_planes(df, self.cfg)
-        df = classify_synapses(df, self.cfg, planes)
-        return df, planes
+
+        pm_bundle = build_pm_planes(df, self.cfg)  # (pm_polys, pm_labels)
+        hc_bundle = build_hc_planes(df, self.cfg)  # (hc_polys, hc_labels)
+
+        df = classify_synapses(df, self.cfg, pm_bundle, hc_bundle)
+
+        # Return both bundles so the visualizer can get exact label mapping
+        return df, (pm_bundle, hc_bundle)
 
     def _ensure_required_objects_in_df(self, df: pd.DataFrame,
                                        cfg: FinderConfig, gid: str) -> pd.DataFrame:
@@ -896,7 +902,11 @@ class App:
                 self._progress_start(f"Opening {gid}…", total_steps)
                 df = self.df_cache[gid]
                 df = identify_poles(df, self.cfg)
-                planes = build_planes(df, self.cfg)
+                pm_bundle = build_pm_planes(df,
+                                            self.cfg)  # (pm_polys, pm_labels)
+                hc_bundle = build_hc_planes(df,
+                                            self.cfg)  # (hc_polys, hc_labels)
+
                 self._progress_tick()
                 msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
                 self._progress_tick()
@@ -917,9 +927,12 @@ class App:
                 msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
                 self._progress_tick(msg)
                 df = identify_poles(df, self.cfg)
-                planes = build_planes(df, self.cfg)
-                self._progress_tick()
-                df = classify_synapses(df, self.cfg, planes)
+
+                pm_bundle = build_pm_planes(df,
+                                            self.cfg)  # (pm_polys, pm_labels)
+                hc_bundle = build_hc_planes(df, self.cfg)
+                df = classify_synapses(df, self.cfg, pm_bundle, hc_bundle)
+
                 self._progress_tick("Classified synapses.")
                 self.df_cache[gid] = df
         except Exception as e:
@@ -928,14 +941,15 @@ class App:
             return
         try:
             self._progress_tick("Rendering viewer...")
-            self.current_viewer = self._open_viewer(df, planes)
+            self.current_viewer = self._open_viewer(df, (pm_bundle, hc_bundle))
             self._progress_finish("Done")
         except Exception as e:
             msg = str(e)
             if ("QtViewer has been deleted" in msg) or ("wrapped C/C++ object" in msg and "QtViewer" in msg):
                 try:
                     self._safe_close_viewer()
-                    self.current_viewer = self._open_viewer(df, planes)
+                    self.current_viewer = self._open_viewer(df, (pm_bundle,
+                                                                 hc_bundle))
                     self._progress_finish("Done")
                 except Exception as e2:
                     self._progress_finish("Failed")
@@ -949,15 +963,13 @@ class App:
                 return
         self.log(f"Opened group '{gid}' in napari.")
 
-    def _open_viewer(self, df: pd.DataFrame, planes) -> napari.Viewer:
+    def _open_viewer(self, df: pd.DataFrame, plane_bundles) -> napari.Viewer:
         from .visualizer import draw_objects
-        reuse = None
-        try:
-            if self.current_viewer is not None and getattr(self.current_viewer, "window", None) is not None:
-                reuse = self.current_viewer
-        except Exception:
-            reuse = None
-        viewer = draw_objects(df, self.cfg, planes, viewer=reuse)
+        reuse = self.current_viewer if (
+                    self.current_viewer is not None and getattr(
+                self.current_viewer, "window", None) is not None) else None
+        pm_bundle, hc_bundle = plane_bundles
+        viewer = draw_objects(df, self.cfg, pm_bundle, hc_bundle, viewer=reuse)
         return viewer
 
     def on_export_selected(self) -> None:
