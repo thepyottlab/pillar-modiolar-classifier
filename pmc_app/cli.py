@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
 import typer
 import os
 
@@ -12,6 +11,7 @@ from .gui import launch_gui
 from .models import FinderConfig
 from .parser import parse_group
 from .processing import merge_dfs, process_position_df, process_volume_df
+from .classifier import build_pm_planes, build_hc_planes,classify_synapses
 
 app = typer.Typer(help="Pillar–Modiolar Classifier CLI")
 
@@ -26,9 +26,9 @@ def gui() -> None:
 def export_all(
     folder: Path = typer.Argument(..., exists=True, file_okay=False, dir_okay=True, readable=True),
     extension: str = typer.Option(".xls", help="File extension to scan"),
-    ribbons: str = typer.Option("ribbon"),
+    ribbons: str = typer.Option("rib"),
     psds: str = typer.Option("psd"),
-    positions: str = typer.Option("sum"),
+    positions: str = typer.Option("pos"),
     ribbons_obj: str = typer.Option("ribbons"),
     psds_obj: str = typer.Option("PSDs"),
     pillar_obj: str = typer.Option("pillar"),
@@ -36,6 +36,7 @@ def export_all(
     case_insensitive: bool = typer.Option(True),
     ribbons_only: bool = typer.Option(False),
     psds_only: bool = typer.Option(False),
+    identify_poles: bool = typer.Option(True),
     out_dir: Path = typer.Option(Path(os.environ.get("LOCALAPPDATA")) /
                                  "Pillar-Modiolar Classifier",
                                  exists=False, file_okay=False, dir_okay=True, writable=True),
@@ -54,6 +55,7 @@ def export_all(
         case_insensitive=case_insensitive,
         ribbons_only=ribbons_only,
         psds_only=psds_only,
+        identify_poles=identify_poles,
     )
     groups = find_groups(cfg)
     if not groups:
@@ -68,10 +70,11 @@ def export_all(
         pos = process_position_df(pos, cfg)
         df = merge_dfs(rib, psd, pos, cfg)
 
-        from .classifier import build_planes, classify_synapses
 
-        planes = build_planes(df, cfg)
-        df = classify_synapses(df, cfg, planes)
+        pm_bundle = build_pm_planes(df, cfg)
+        hc_bundle = build_hc_planes(df, cfg)
+
+        df = classify_synapses(df, cfg, pm_bundle, hc_bundle)
         export_df_csv(df, gid, out_dir)
 
     typer.echo(f"Exported {len(groups)} group(s) to {out_dir}")
