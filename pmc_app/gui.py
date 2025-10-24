@@ -10,7 +10,7 @@ assets resolved from the installed package.
 
 import configparser
 import os
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
@@ -18,6 +18,8 @@ from typing import Dict, Optional, Tuple, Iterable, Set
 
 import napari
 import pandas as pd
+import textwrap
+
 from magicgui.types import FileDialogMode
 from magicgui.widgets import (
     Container,
@@ -29,17 +31,12 @@ from magicgui.widgets import (
     Label,
     TextEdit,
 )
-from qtpy.QtGui import QIcon, QPainter, QColor, QFontMetrics
+from qtpy.QtGui import QIcon, QPainter, QColor, QFontMetrics, QCursor
+from qtpy.QtCore import QCoreApplication, QObject, QEvent, QTimer
 from qtpy.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QSizePolicy,
-    QStyleOptionProgressBar,
-    QStyle,
-    QProgressBar,
+    QMainWindow, QWidget, QVBoxLayout, QSizePolicy,
+    QStyleOptionProgressBar, QStyle, QProgressBar, QToolTip
 )
-from qtpy.QtCore import QCoreApplication
 
 from .classifier import identify_poles, build_pm_planes, build_hc_planes, classify_synapses
 from .exporter import prompt_export_dir, export_df_csv
@@ -47,6 +44,60 @@ from .finder import find_groups
 from .models import FinderConfig, Group
 from .parser import parse_group
 from .processing import process_volume_df, process_position_df, merge_dfs
+
+
+# ---------------------------------------------------------------------------
+# Tooltip text placeholders (edit these strings to show hover help in the UI)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class TooltipText:
+    case_insensitive: str = (
+        "Ignore letter case when matching file names, extensions, and identifiers."
+    )
+    file_extension: str = (
+        "File extension of the Imaris exports."
+    )
+    ribbons_sheet_id: str = (
+        "Suffix/identifier used for presynaptic ribbon volume sheets."
+    )
+    psds_sheet_id: str = (
+        "Suffix/identifier used for glutamate-receptor patch (PSD) volume sheets."
+    )
+    positions_sheet_id: str = (
+        "Identifier for the group-level export sheet that contains object positions."
+    )
+    identify_poles: str = (
+        "On: mark the spot closest to most synapses as basal. "
+        "Off: mark the spot that was created first as apical (lower ID)."
+    )
+    ribbons_only: str = (
+        "Select when no glutamate-receptor patch volumes were analyzed."
+    )
+    psds_only: str = (
+        "Select when no presynaptic ribbon volumes were analyzed."
+    )
+    update_all_fields: str = (
+        "Store all values in ‘Import’ and ‘Object names’."
+    )
+    ribbons_obj_id: str = (
+        "Object name for presynaptic ribbons in Imaris."
+    )
+    psds_obj_id: str = (
+        "Object name for glutamate-receptor patches in Imaris."
+    )
+    pillar_obj_id: str = (
+        "Object name of the spot on the pillar side of the inner hair cell in Imaris."
+    )
+    modiolar_obj_id: str = (
+        "Object name of the spot on the modiolar side of the inner hair cell "
+        "in Imaris."
+    )
+
+TOOLTIP_WRAP_CH = 72      # ≈ characters per line before wrapping
+TOOLTIP_DELAY_MS = 600    # delay before tooltips show (milliseconds)
+
+TT = TooltipText()
+# ---------------------------------------------------------------------------
 
 
 APP_WIDTH = 667
@@ -116,6 +167,7 @@ PROG_CHUNK_COLOR = "#228B22"
 CONFIG_VENDOR = "ThePyottLab"
 CONFIG_APP = "PillarModiolarClassifier"
 CONFIG_FILENAME = "config.ini"
+
 
 
 def _resource_path(name: str) -> str:
@@ -188,6 +240,48 @@ QPushButton#import:pressed {{
 }}
 QCheckBox {{ spacing: 6px; margin-left: 0px; }}
 """.strip()
+
+
+def _wrap_tt(text: str, width: int = TOOLTIP_WRAP_CH) -> str:
+    """Soft-wrap tooltip text at roughly `width` characters."""
+    return textwrap.fill(text, width=width)
+
+class ToolTipDelayFilter(QObject):
+    def __init__(self, delay_ms: int = TOOLTIP_DELAY_MS, parent=None):
+        super().__init__(parent)
+        self._delay = delay_ms
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._target = None
+        self._timer.timeout.connect(self._show)
+
+    def eventFilter(self, obj, event):
+        et = event.type()
+
+        # Start our own delay on first entry/hover
+        if et in (QEvent.Enter, QEvent.HoverEnter):
+            if not obj.toolTip():
+                return False
+            self._target = obj
+            self._timer.start(self._delay)
+            return False  # don't consume
+
+        # Cancel/hide on exit or interaction
+        if et in (QEvent.Leave, QEvent.HoverLeave, QEvent.FocusOut, QEvent.MouseButtonPress):
+            self._timer.stop()
+            QToolTip.hideText()
+            self._target = None
+            return False
+
+        # Eat the default tooltip event so Qt doesn't apply its own wake-up delay
+        if et == QEvent.ToolTip:
+            return True
+
+        return False
+
+    def _show(self):
+        if self._target:
+            QToolTip.showText(QCursor.pos(), self._target.toolTip(), self._target)
 
 
 def _user_config_dir() -> Path:
@@ -330,6 +424,26 @@ class App:
 
         self.txt_log = TextEdit(value="", tooltip="Logs and progress")
         self.cbo_group.native.setEditable(False)
+
+        # ---------------------------
+        # Apply tooltips from TT here
+        # ---------------------------
+        self.w_case_insensitive.native.setToolTip(_wrap_tt(TT.case_insensitive))
+        self.w_extensions.native.setToolTip(_wrap_tt(TT.file_extension))
+        self.w_ribbons.native.setToolTip(_wrap_tt(TT.ribbons_sheet_id))
+        self.w_psds.native.setToolTip(_wrap_tt(TT.psds_sheet_id))
+        self.w_positions.native.setToolTip(_wrap_tt(TT.positions_sheet_id))
+        self.w_identify_poles.native.setToolTip(_wrap_tt(TT.identify_poles))
+        self.w_ribbons_only.native.setToolTip(_wrap_tt(TT.ribbons_only))
+        self.w_psds_only.native.setToolTip(_wrap_tt(TT.psds_only))
+        self.btn_update_all.native.setToolTip(_wrap_tt(TT.update_all_fields))
+        self.w_ribbons_obj.native.setToolTip(_wrap_tt(TT.ribbons_obj_id))
+        self.w_psds_obj.native.setToolTip(_wrap_tt(TT.psds_obj_id))
+        self.w_pillar_obj.native.setToolTip(_wrap_tt(TT.pillar_obj_id))
+        self.w_modiolar_obj.native.setToolTip(_wrap_tt(TT.modiolar_obj_id))
+
+
+        # ---------------------------
 
         def _min_w(widget, w, expanding=False):
             widget.native.setMinimumWidth(w)
@@ -505,6 +619,21 @@ class App:
             labels=False,
         )
         set_layout(self.panel, margins=MARGINS_APP_AREA, spacing=BETWEEN_CARD_PADDING)
+
+        # Install a single delay filter on all tooltip-bearing widgets
+        self._tt_filter = ToolTipDelayFilter(parent=self.panel.native)
+        for w in [
+            self.w_case_insensitive.native, self.w_extensions.native,
+            self.w_ribbons.native,
+            self.w_psds.native, self.w_positions.native,
+            self.w_identify_poles.native,
+            self.w_ribbons_only.native, self.w_psds_only.native,
+            self.btn_update_all.native,
+            self.w_ribbons_obj.native, self.w_psds_obj.native,
+            self.w_pillar_obj.native,
+            self.w_modiolar_obj.native
+        ]:
+            w.installEventFilter(self._tt_filter)
 
         self.cbo_group.native.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.txt_log.native.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
