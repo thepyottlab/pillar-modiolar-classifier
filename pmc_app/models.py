@@ -47,7 +47,8 @@ class FinderConfig:
     case_insensitive: bool = True
     ribbons_only: bool = False
     psds_only: bool = False
-    remember_input_fields: bool = False
+    identify_poles: bool = True
+    remember_input_fields: bool = True
 
     @property
     def mode(self) -> InputMode:

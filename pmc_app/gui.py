@@ -30,7 +30,15 @@ from magicgui.widgets import (
     TextEdit,
 )
 from qtpy.QtGui import QIcon, QPainter, QColor, QFontMetrics
-from qtpy.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QSizePolicy, QStyleOptionProgressBar, QStyle, QProgressBar
+from qtpy.QtWidgets import (
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QSizePolicy,
+    QStyleOptionProgressBar,
+    QStyle,
+    QProgressBar,
+)
 from qtpy.QtCore import QCoreApplication
 
 from .classifier import identify_poles, build_pm_planes, build_hc_planes, classify_synapses
@@ -292,11 +300,14 @@ class App:
         self.w_case_insensitive = CheckBox(label="Case insensitive", value=True)
 
         self.w_extensions = LineEdit(label="", value=".xls")
-        self.w_ribbons = LineEdit(label="", value="ribbon")
+        self.w_ribbons = LineEdit(label="", value="rib")
         self.w_psds = LineEdit(label="", value="psd")
-        self.w_positions = LineEdit(label="", value="sum")
+        self.w_positions = LineEdit(label="", value="pos")
 
-        self.w_remember_fields = CheckBox(label="Remember settings", value=False)
+        # Removed: Remember settings checkbox
+        # New: Identify poles toggle (controls whether identify_poles runs)
+        self.w_identify_poles = CheckBox(label="Identify poles", value=True)
+
         self.w_ribbons_only = CheckBox(label="Ribbons only", value=False)
         self.w_psds_only = CheckBox(label="PSDs only", value=False)
         self.btn_update_all = PushButton(text="Update all fields")
@@ -377,8 +388,9 @@ class App:
         right_buttons = Container(widgets=[self.btn_update_all, self.btn_load], layout="horizontal", labels=False)
         set_layout(right_buttons, margins=(0, 0, 0, 0), spacing=ACTION_BUTTONS_GAP)
 
+        # Filters row: Identify poles + ribbons/psds toggles + action buttons
         import_filters_row = Container(
-            widgets=[self.w_remember_fields, self.w_ribbons_only, self.w_psds_only, right_buttons],
+            widgets=[self.w_identify_poles, self.w_ribbons_only, self.w_psds_only, right_buttons],
             layout="horizontal",
             labels=False,
         )
@@ -515,8 +527,8 @@ class App:
         self.w_psds_only.changed.connect(
             lambda v: self._checkbox_update("psds_only", "PSDs only", bool(v), invalidate=True)
         )
-        self.w_remember_fields.changed.connect(
-            lambda v: self._checkbox_update("remember_input_fields", "Remember settings", bool(v))
+        self.w_identify_poles.changed.connect(
+            lambda v: self._checkbox_update("identify_poles", "Identify poles", bool(v))
         )
         self.w_case_insensitive.changed.connect(
             lambda v: self._checkbox_update("case_insensitive", "Case insensitive", bool(v))
@@ -572,8 +584,19 @@ class App:
         self._progress_total = None
         self._progress_value = 0
 
+    def _remember_enabled(self) -> bool:
+        """Read remember_input_fields from config.ini (default True)."""
+        cp = _read_config_from(_user_config_path())
+        try:
+            if cp is None:
+                return True
+            return cp.has_section("inputs") and cp.getboolean("inputs", "remember_input_fields", fallback=True)
+        except Exception:
+            return True
+
     def _persist_inputs_if_enabled(self) -> None:
-        if not self.w_remember_fields.value:
+        # Governed by config flag (no GUI toggle). Default True.
+        if not (self.cfg and self.cfg.remember_input_fields):
             return
         cfg_path = _user_config_path()
         _ensure_parent_dir(cfg_path)
@@ -595,24 +618,37 @@ class App:
     def _load_persisted_inputs(self) -> None:
         user_cfg = _read_config_from(_user_config_path())
         if user_cfg is None:
-            legacy = _read_config_from(_legacy_config_path())
-            if legacy is None:
-                return
-            user_cfg = legacy
+            # First launch: create config.ini with sane defaults (remember=True, identify_poles=True)
+            cp = configparser.ConfigParser()
+            cp["inputs"] = {}
+            snap = asdict(FinderConfig(folder=Path(".")))  # defaults include remember_input_fields=True, identify_poles=True
+            snap["folder"] = str(Path("."))
+            for k, v in snap.items():
+                cp["inputs"][k] = str(v)
+            cfg_path = _user_config_path()
+            _ensure_parent_dir(cfg_path)
             try:
-                cfg_path = _user_config_path()
-                _ensure_parent_dir(cfg_path)
                 with cfg_path.open("w", encoding="utf-8") as f:
-                    legacy.write(f)
+                    cp.write(f)
             except Exception:
                 pass
+            user_cfg = cp
+        else:
+            # Optional: migrate legacy top-level config.ini if present
+            legacy = _read_config_from(_legacy_config_path())
+            if legacy is not None:
+                try:
+                    cfg_path = _user_config_path()
+                    _ensure_parent_dir(cfg_path)
+                    with cfg_path.open("w", encoding="utf-8") as f:
+                        legacy.write(f)
+                    user_cfg = legacy
+                except Exception:
+                    pass
+
         if "inputs" not in user_cfg:
             return
         sec = user_cfg["inputs"]
-        remember = sec.getboolean("remember_input_fields", fallback=False)
-        self.w_remember_fields.value = remember
-        if not remember:
-            return
 
         def _set(le: LineEdit, key: str, default: str):
             le.native.setText(sec.get(key, fallback=default))
@@ -634,6 +670,8 @@ class App:
         self.w_case_insensitive.value = sec.getboolean("case_insensitive", fallback=True)
         self.w_ribbons_only.value = sec.getboolean("ribbons_only", fallback=False)
         self.w_psds_only.value = sec.getboolean("psds_only", fallback=False)
+        # New flag: Identify poles (default True)
+        self.w_identify_poles.value = sec.getboolean("identify_poles", fallback=True)
         self._update_mode_ui()
 
     def _update_mode_ui(self) -> None:
@@ -643,19 +681,6 @@ class App:
         self.w_psds_obj.enabled = not rib_only
         self.w_ribbons.enabled = not psd_only
         self.w_ribbons_obj.enabled = not psd_only
-
-    def _write_remember_flag(self, state: bool) -> None:
-        try:
-            cfg_path = _user_config_path()
-            _ensure_parent_dir(cfg_path)
-            cp = _read_config_from(cfg_path) or configparser.ConfigParser()
-            if "inputs" not in cp:
-                cp["inputs"] = {}
-            cp["inputs"]["remember_input_fields"] = "true" if state else "false"
-            with cfg_path.open("w", encoding="utf-8") as f:
-                cp.write(f)
-        except Exception:
-            pass
 
     def _get_text(self, widget: LineEdit) -> str:
         return widget.native.text().strip()
@@ -691,14 +716,6 @@ class App:
     def _checkbox_update(self, cfg_attr: str, label: str, state: bool, *, invalidate: bool = False) -> None:
         if self.cfg is None:
             self.cfg = self._snap_cfg()
-        if cfg_attr == "remember_input_fields":
-            self._write_remember_flag(state)
-            setattr(self.cfg, cfg_attr, state)
-            if state:
-                self._persist_inputs_if_enabled()
-            self._update_mode_ui()
-            self.log(f"{label} {'enabled' if state else 'disabled'}")
-            return
         if cfg_attr == "ribbons_only" and state and self.w_psds_only.value:
             self.w_psds_only.value = False
         if cfg_attr == "psds_only" and state and self.w_ribbons_only.value:
@@ -733,7 +750,8 @@ class App:
             case_insensitive=bool(self.w_case_insensitive.value),
             ribbons_only=bool(self.w_ribbons_only.value),
             psds_only=bool(self.w_psds_only.value),
-            remember_input_fields=bool(self.w_remember_fields.value),
+            identify_poles=bool(self.w_identify_poles.value),
+            remember_input_fields=self._remember_enabled(),
         )
 
     def _make_cfg(self) -> FinderConfig:
@@ -754,7 +772,8 @@ class App:
             case_insensitive=bool(self.w_case_insensitive.value),
             ribbons_only=bool(self.w_ribbons_only.value),
             psds_only=bool(self.w_psds_only.value),
-            remember_input_fields=bool(self.w_remember_fields.value),
+            identify_poles=bool(self.w_identify_poles.value),
+            remember_input_fields=self._remember_enabled(),
         )
 
     def _found_suffix_tokens(self, folder: Path, extension: str, tokens: Iterable[str], ci: bool) -> Set[str]:
@@ -809,7 +828,8 @@ class App:
         df = merge_dfs(ribbons_df, psds_df, positions_df, self.cfg)
         msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
 
-        df = identify_poles(df, self.cfg)
+        if self.cfg.identify_poles:
+            df = identify_poles(df, self.cfg)
 
         pm_bundle = build_pm_planes(df, self.cfg)  # (pm_polys, pm_labels)
         hc_bundle = build_hc_planes(df, self.cfg)  # (hc_polys, hc_labels)
@@ -823,9 +843,11 @@ class App:
                                        cfg: FinderConfig, gid: str) -> pd.DataFrame:
         if "object" not in df.columns:
             raise RuntimeError("Expected column 'object' not found in data.")
+
         def _norm(s: str) -> str:
             s = str(s).strip()
             return s.lower() if cfg.case_insensitive else s
+
         present = {_norm(x) for x in df["object"].astype(str).unique()}
         required_map = {
             "Pillar object ID": cfg.pillar_obj,
@@ -851,8 +873,7 @@ class App:
             raise RuntimeError("\n".join(missing_msgs))
 
         n_rib = len(df.loc[df["object"] == "Unclassified " + cfg.ribbons_obj])
-        n_psd = len(df.loc[df["object"] == "Unclassified " +
-                           cfg.psds_obj])
+        n_psd = len(df.loc[df["object"] == "Unclassified " + cfg.psds_obj])
 
         msg = (f"{n_rib} ribbon(s) and {n_psd} PSD(s) were not "
                f"allocated to any IHCs and are excluded from classification.")
@@ -901,12 +922,10 @@ class App:
                 total_steps = 3
                 self._progress_start(f"Opening {gid}…", total_steps)
                 df = self.df_cache[gid]
-                df = identify_poles(df, self.cfg)
-                pm_bundle = build_pm_planes(df,
-                                            self.cfg)  # (pm_polys, pm_labels)
-                hc_bundle = build_hc_planes(df,
-                                            self.cfg)  # (hc_polys, hc_labels)
-
+                if self.cfg.identify_poles:
+                    df = identify_poles(df, self.cfg)
+                pm_bundle = build_pm_planes(df, self.cfg)  # (pm_polys, pm_labels)
+                hc_bundle = build_hc_planes(df, self.cfg)  # (hc_polys, hc_labels)
                 self._progress_tick()
                 msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
                 self._progress_tick()
@@ -926,13 +945,11 @@ class App:
                 self._progress_tick()
                 msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
                 self._progress_tick(msg)
-                df = identify_poles(df, self.cfg)
-
-                pm_bundle = build_pm_planes(df,
-                                            self.cfg)  # (pm_polys, pm_labels)
+                if self.cfg.identify_poles:
+                    df = identify_poles(df, self.cfg)
+                pm_bundle = build_pm_planes(df, self.cfg)  # (pm_polys, pm_labels)
                 hc_bundle = build_hc_planes(df, self.cfg)
                 df = classify_synapses(df, self.cfg, pm_bundle, hc_bundle)
-
                 self._progress_tick("Classified synapses.")
                 self.df_cache[gid] = df
         except Exception as e:
@@ -948,8 +965,7 @@ class App:
             if ("QtViewer has been deleted" in msg) or ("wrapped C/C++ object" in msg and "QtViewer" in msg):
                 try:
                     self._safe_close_viewer()
-                    self.current_viewer = self._open_viewer(df, (pm_bundle,
-                                                                 hc_bundle))
+                    self.current_viewer = self._open_viewer(df, (pm_bundle, hc_bundle))
                     self._progress_finish("Done")
                 except Exception as e2:
                     self._progress_finish("Failed")
@@ -966,8 +982,8 @@ class App:
     def _open_viewer(self, df: pd.DataFrame, plane_bundles) -> napari.Viewer:
         from .visualizer import draw_objects
         reuse = self.current_viewer if (
-                    self.current_viewer is not None and getattr(
-                self.current_viewer, "window", None) is not None) else None
+            self.current_viewer is not None and getattr(self.current_viewer, "window", None) is not None
+        ) else None
         pm_bundle, hc_bundle = plane_bundles
         viewer = draw_objects(df, self.cfg, pm_bundle, hc_bundle, viewer=reuse)
         return viewer
@@ -990,7 +1006,7 @@ class App:
             else:
                 df, _ = self._build_df_for_group(gid)
                 self.df_cache[gid] = df
-            msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
+            _ = self._ensure_required_objects_in_df(df, self.cfg, gid)
         except Exception as e:
             self.log(f"[error] Cannot export '{gid}': {e}")
             return
@@ -1020,7 +1036,7 @@ class App:
                 else:
                     df, _ = self._build_df_for_group(gid)
                     self.df_cache[gid] = df
-                msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
+                _ = self._ensure_required_objects_in_df(df, self.cfg, gid)
                 out_path = export_df_csv(df, gid, out_dir)
                 ok += 1
                 self.log(f"[{i}/{total}] Exported '{gid}' to {out_path}")
