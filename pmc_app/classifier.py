@@ -200,7 +200,7 @@ def classify_synapses(
     Adds:
         * ``localization``: pillar / modiolar side inferred per IHC using the PM plane.
         * ``pillar_modiolar_axis``: signed distance to the PM rectangle (perpendicular).
-        * ``habenular_cuticular_axis``: distance to the HC rectangle (perpendicular).
+        * ``habenular_cuticular_axis``: signed distance to the HC rectangle (perpendicular).
 
     The PM/HC geometries are derived per IHC from apical/basal anchors and the
     local synapse spread. For finite rectangles, distances clamp to edges/corners.
@@ -216,6 +216,18 @@ def classify_synapses(
     mod_row = out[out["object"] == cfg.modiolar_obj].iloc[0]
     P_pil = np.array([[float(pil_row["pos_z"]), float(pil_row["pos_y"]), float(pil_row["pos_x"])]], dtype=F)
     P_mod = np.array([[float(mod_row["pos_z"]), float(mod_row["pos_y"]), float(mod_row["pos_x"])]], dtype=F)
+
+    pm_map: dict[str, np.ndarray] = {}
+    if planes is not None:
+        pm_polys, pm_labels = planes
+        for i, lab in enumerate(pm_labels):
+            pm_map[str(lab)] = pm_polys[i]
+
+    hc_map: dict[str, np.ndarray] = {}
+    if hc_planes is not None:
+        hc_polys, hc_labels = hc_planes
+        for i, lab in enumerate(hc_labels):
+            hc_map[str(lab)] = hc_polys[i]
 
     ab = out[out["object"].isin(["apical", "basal"])][["ihc_label", "object"]]
     matched = set(ab.groupby("ihc_label")["object"].nunique().loc[lambda s: s >= 2].index)
@@ -249,9 +261,9 @@ def classify_synapses(
         a0 = np.array([z1, y1, x1], dtype=F)
         return a0, U, v_hat, n_hat, vmin, vmax
 
-    def side_sign(P_zyx, a0, n_hat):
+    def side_sign(P_zyx, A, n_hat):
         """Return pillar/modiolar side as 0/1 relative to a PM plane."""
-        s = (P_zyx - a0) @ n_hat
+        s = (P_zyx - A) @ n_hat
         return (s >= 0.0).astype(int)
 
     def point_to_rect_distance(P, A, U, V):
@@ -291,33 +303,58 @@ def classify_synapses(
         m_syn = (out["ihc_label"] == label) & (out["object"].isin([ribbons, psds]))
         group_xy = out.loc[m_syn, ["pos_x", "pos_y"]].to_numpy(dtype=F)
 
-        a0, U, v_hat, n_hat, vmin, vmax = geometry_from_label(ap, ba, group_xy)
+        lab_key = str(label)
 
-        a_pm = a0 + v_hat * vmin
-        V_pm = v_hat * (vmax - vmin)
+        if lab_key in pm_map:
+            poly_pm = pm_map[lab_key]
+            A_pm = poly_pm[1].astype(F)
+            U_pm = (poly_pm[2] - poly_pm[1]).astype(F)
+            V_pm = (poly_pm[0] - poly_pm[1]).astype(F)
+            n_hat = np.cross(U_pm, V_pm).astype(F, copy=False)
+            n_hat = n_hat / (float(np.linalg.norm(n_hat)) + EPS)
+            v_hat = V_pm / (float(np.linalg.norm(V_pm)) + EPS)
+            a0 = A_pm
+            U = U_pm
+            vmin = 0.0
+            vmax = float(np.linalg.norm(V_pm))
+        else:
+            a0, U, v_hat, n_hat, vmin, vmax = geometry_from_label(ap, ba, group_xy)
+            A_pm = a0 + v_hat * vmin
+            V_pm = v_hat * (vmax - vmin)
+            U_pm = U
 
         P_syn = out.loc[m_syn, ["pos_z", "pos_y", "pos_x"]].to_numpy(dtype=F)
-        syn_sides = side_sign(P_syn, a0, n_hat)
+        syn_sides = side_sign(P_syn, A_pm, n_hat)
 
-        pillar_side = side_sign(P_pil, a0, n_hat)[0]
-        modiolar_side = side_sign(P_mod, a0, n_hat)[0]
+        pillar_side = side_sign(P_pil, A_pm, n_hat)[0]
+        modiolar_side = side_sign(P_mod, A_pm, n_hat)[0]
         if pillar_side != modiolar_side:
             pillar_side_counts[pillar_side] += 1
 
-        per_label[str(label)] = {
+        per_label[lab_key] = {
             "mask_syn": m_syn,
             "syn_sides": syn_sides,
             "pillar_side": int(pillar_side),
             "modiolar_side": int(modiolar_side),
+            "a_pm": A_pm,
+            "U_pm": U_pm,
+            "V_pm": V_pm,
             "a0": a0,
             "U": U,
             "v_hat": v_hat,
             "n_hat": n_hat,
             "vmin": vmin,
             "vmax": vmax,
-            "a_pm": a_pm,
-            "V_pm": V_pm,
         }
+
+        if lab_key in hc_map:
+            poly_hc = hc_map[lab_key]
+            A_hc = poly_hc[2].astype(F)
+            V_hc = (poly_hc[3] - poly_hc[2]).astype(F)
+            W_hc = (poly_hc[1] - poly_hc[2]).astype(F)
+            N_hc = np.cross(V_hc, W_hc).astype(F, copy=False)
+            N_hc = N_hc / (float(np.linalg.norm(N_hc)) + EPS)
+            per_label[lab_key].update({"a_hc": A_hc, "V_hc": V_hc, "W_hc": W_hc, "N_hc": N_hc})
 
     global_pillar_side = 0 if pillar_side_counts[0] >= pillar_side_counts[1] else 1
     global_modiolar_side = 1 - global_pillar_side
@@ -343,54 +380,53 @@ def classify_synapses(
 
         P = out.loc[idx, ["pos_z", "pos_y", "pos_x"]].to_numpy(dtype=F)
         if len(P):
-            a_pm = pack["a_pm"]
-            U = pack["U"]
+            A_pm = pack["a_pm"]
+            U_pm = pack["U_pm"]
             V_pm = pack["V_pm"]
             d = np.empty(len(idx), dtype=F)
             for i in range(len(idx)):
-                d[i] = point_to_rect_distance(P[i], a_pm, U, V_pm)
+                d[i] = point_to_rect_distance(P[i], A_pm, U_pm, V_pm)
 
             loc_vals = out.loc[idx, "localization"].astype("string")
             is_pillar = loc_vals.fillna("").str.lower().eq("pillar").to_numpy()
-            sign = np.where(is_pillar, -1.0, 1.0)
-            out.loc[idx, "pillar_modiolar_axis"] = d * sign
+            sign_pm = np.where(is_pillar, -1.0, 1.0)
+            out.loc[idx, "pillar_modiolar_axis"] = d * sign_pm
 
-    for _, pack in per_label.items():
+    for lab_key, pack in per_label.items():
         idx = out.index[pack["mask_syn"]]
         if not len(idx):
             continue
 
-        a0 = pack["a0"]
-        U = pack["U"]
-        vmin = pack["vmin"]
-        vmax = pack["vmax"]
-        v_hat = pack["v_hat"]
-        n_hat = pack["n_hat"]
-
-        V = v_hat * (vmax - vmin)
-
-        v_mid = 0.5 * (vmin + vmax)
-        base_center = a0 + U + v_hat * v_mid
+        if ("a_hc" in pack) and ("V_hc" in pack) and ("W_hc" in pack) and ("N_hc" in pack):
+            A_hc = pack["a_hc"]
+            V_hc = pack["V_hc"]
+            W_hc = pack["W_hc"]
+            N_hc = pack["N_hc"]
+        else:
+            a0 = pack["a0"]
+            U = pack["U"]
+            vmin = pack["vmin"]
+            vmax = pack["vmax"]
+            v_hat = pack["v_hat"]
+            n_hat = pack["n_hat"]
+            V_hc = v_hat * (vmax - vmin)
+            v_mid = 0.5 * (vmin + vmax)
+            base_center = a0 + U + v_hat * v_mid
+            A_hc = a0 + U + v_hat * vmin + n_hat * 0.0
+            W_hc = n_hat * 1.0
+            N_hc = np.cross(V_hc, W_hc).astype(F, copy=False)
+            N_hc = N_hc / (float(np.linalg.norm(N_hc)) + EPS)
+            _ = base_center
 
         gpos = out.loc[idx, ["pos_z", "pos_y", "pos_x"]].to_numpy(dtype=F)
-        if len(gpos):
-            dots_w = (gpos - base_center) @ n_hat
-            wmin, wmax = dots_w.min().item(), dots_w.max().item()
-        else:
-            wmin, wmax = -0.5, 0.5
-
-        norm_v = np.linalg.norm(V).item()
-        if (wmax - wmin) < 1e-6 * (norm_v + 1.0):
-            half = 0.25 * max(norm_v, 1.0)
-            wmin, wmax = -half, +half
-
-        W = n_hat * (wmax - wmin)
-        a_hc = a0 + U + v_hat * vmin + n_hat * wmin
-
         d_hc = np.empty(len(idx), dtype=F)
-        for i in range(len(idx)):
-            d_hc[i] = point_to_rect_distance(gpos[i], a_hc, V, W)
-
-        out.loc[idx, "habenular_cuticular_axis"] = d_hc
+        if len(gpos):
+            for i in range(len(idx)):
+                d_abs = point_to_rect_distance(gpos[i], A_hc, V_hc, W_hc)
+                s = float((gpos[i] - A_hc) @ N_hc)
+                d_hc[i] = d_abs if s < 0.0 else -d_abs
+            out.loc[idx, "habenular_cuticular_axis"] = d_hc
 
     return out
+
+

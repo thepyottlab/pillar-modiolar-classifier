@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from weakref import WeakKeyDictionary
 from typing import Any
 
@@ -11,6 +12,11 @@ import pandas as pd
 from magicgui.widgets import CheckBox, Container, PushButton
 from numpy.typing import NDArray
 
+warnings.filterwarnings(
+    "ignore",
+    message=r"Applying the encoding failed\. Using the safe fallback value instead\.",
+    module="napari.layers.utils.style_encoding",
+)
 
 _VIEWER_STATE = WeakKeyDictionary()
 
@@ -369,7 +375,7 @@ def draw_objects(
             border_color="transparent",
             opacity=1.0,
             visible=False,
-            features={"label": []},
+            features=pd.DataFrame({"label": []}),
             text=make_label_cfg(),
         )
         distance_paths_ribbons_hc = viewer.add_vectors(
@@ -390,7 +396,7 @@ def draw_objects(
             border_color="transparent",
             opacity=1.0,
             visible=False,
-            features={"label": []},
+            features=pd.DataFrame({"label": []}),
             text=make_label_cfg(),
         )
 
@@ -413,7 +419,7 @@ def draw_objects(
             border_color="transparent",
             opacity=1.0,
             visible=False,
-            features={"label": []},
+            features=pd.DataFrame({"label": []}),
             text=make_label_cfg(),
         )
         distance_paths_psds_hc = viewer.add_vectors(
@@ -434,7 +440,7 @@ def draw_objects(
             border_color="transparent",
             opacity=1.0,
             visible=False,
-            features={"label": []},
+            features=pd.DataFrame({"label": []}),
             text=make_label_cfg(),
         )
 
