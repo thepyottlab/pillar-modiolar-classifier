@@ -1,3 +1,5 @@
+"""Normalization and merging of Volume/Position sheets."""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -6,22 +8,17 @@ from .models import FinderConfig
 
 
 def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize a volume table to:
+    """Normalize a 'Volume' sheet to a compact schema.
 
-    Columns: ['id', 'ihc_label', 'object', 'object_id', 'volume'].
-
-    Robust to empty input or missing 'Set N' columns.
-
-    Args:
-        df: Raw 'Volume' sheet.
-
-    Returns:
-        Normalized DataFrame subset.
+    Produces a subset with columns: ``['id', 'ihc_label', 'object', 'object_id', 'volume']``.
+    If no ``Set N`` columns are present or the frame is empty, returns a best-effort subset.
     """
     out_cols = ["id", "ihc_label", "object", "object_id", "volume"]
 
-    set_cols = sorted((c for c in df.columns if isinstance(c, str) and c.startswith("Set ")),
-                  key=lambda c: int(c.split(' ', 1)[1]))
+    set_cols = sorted(
+        (c for c in df.columns if isinstance(c, str) and c.startswith("Set ")),
+        key=lambda c: int(c.split(" ", 1)[1]),
+    )
 
     if len(set_cols) == 0 or len(df) == 0:
         existing = [c for c in out_cols if c in df.columns]
@@ -31,9 +28,9 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
     has_any = mask.fillna(False).filter(like="Set").any(axis=1)
     set_col_series = mask.fillna(False).idxmax(axis=1).where(has_any)
     ihc_label = set_col_series.str.extract(r"Set\s*(\d+)", expand=False).astype(object)
+
     df = df.copy()
     df["ihc_label"] = ihc_label
-
     df = df.rename(columns={"ID": "object_id", "Volume": "volume"})
 
     existing = [c for c in out_cols if c in df.columns]
@@ -41,7 +38,11 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def process_position_df(df: pd.DataFrame, cfg: FinderConfig) -> pd.DataFrame:
-    """Normalize 'Position' sheet columns and derive apical/basal marks."""
+    """Normalize 'Position' sheet columns and derive apical/basal marks.
+
+    The apical anchor is the minimum object_id within an IHC, and the basal
+    anchor is the maximum object_id.
+    """
     df = df.rename(
         columns={
             "Position X": "pos_x",
@@ -70,12 +71,23 @@ def process_position_df(df: pd.DataFrame, cfg: FinderConfig) -> pd.DataFrame:
     return df
 
 
-def merge_dfs(ribbons_df: pd.DataFrame, psds_df: pd.DataFrame, positions_df:
-pd.DataFrame, cfg: FinderConfig) -> pd.DataFrame:
-    """Merge normalized volume and position frames into a unified table."""
+def merge_dfs(
+    ribbons_df: pd.DataFrame,
+    psds_df: pd.DataFrame,
+    positions_df: pd.DataFrame,
+    cfg: FinderConfig,
+) -> pd.DataFrame:
+    """Merge normalized volume and position frames into a unified table.
+
+    Unlabeled synapses are re-tagged as ``"Unclassified <object>"`` so they can
+    be excluded from classification and clearly reported.
+    """
     df_synapses = pd.concat([psds_df, ribbons_df], ignore_index=True)
     df = df_synapses.merge(
-        positions_df, on=["id", "object", "object_id"], how="outer", suffixes=("", "_temp")
+        positions_df,
+        on=["id", "object", "object_id"],
+        how="outer",
+        suffixes=("", "_temp"),
     )
 
     if "ihc_label_temp" in df.columns:
@@ -100,4 +112,5 @@ pd.DataFrame, cfg: FinderConfig) -> pd.DataFrame:
         },
         errors="ignore",
     )
+
     return df

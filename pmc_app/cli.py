@@ -1,17 +1,19 @@
+"""Command-line interface for the Pillar–Modiolar Classifier."""
+
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import typer
-import os
 
+from .classifier import build_hc_planes, build_pm_planes, classify_synapses
 from .exporter import export_df_csv
 from .finder import find_groups
 from .gui import launch_gui
 from .models import FinderConfig
 from .parser import parse_group
 from .processing import merge_dfs, process_position_df, process_volume_df
-from .classifier import build_pm_planes, build_hc_planes,classify_synapses
 
 app = typer.Typer(help="Pillar–Modiolar Classifier CLI")
 
@@ -37,11 +39,19 @@ def export_all(
     ribbons_only: bool = typer.Option(False),
     psds_only: bool = typer.Option(False),
     identify_poles: bool = typer.Option(True),
-    out_dir: Path = typer.Option(Path(os.environ.get("LOCALAPPDATA")) /
-                                 "Pillar-Modiolar Classifier",
-                                 exists=False, file_okay=False, dir_okay=True, writable=True),
-):
-    """Headless classification and CSV export for all detected groups."""
+    out_dir: Path = typer.Option(
+        Path(os.environ.get("LOCALAPPDATA")) / "Pillar-Modiolar Classifier",
+        exists=False,
+        file_okay=False,
+        dir_okay=True,
+        writable=True,
+    ),
+) -> None:
+    """Headless classification and CSV export for all detected groups.
+
+    Raises:
+        typer.Exit: If no groups are found.
+    """
     cfg = FinderConfig(
         folder=folder,
         ribbons=ribbons,
@@ -57,6 +67,7 @@ def export_all(
         psds_only=psds_only,
         identify_poles=identify_poles,
     )
+
     groups = find_groups(cfg)
     if not groups:
         typer.echo("No groups found.")
@@ -69,7 +80,6 @@ def export_all(
         psd = process_volume_df(psd)
         pos = process_position_df(pos, cfg)
         df = merge_dfs(rib, psd, pos, cfg)
-
 
         pm_bundle = build_pm_planes(df, cfg)
         hc_bundle = build_hc_planes(df, cfg)

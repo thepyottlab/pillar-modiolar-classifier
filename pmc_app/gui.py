@@ -1,104 +1,77 @@
+"""GUI for the Pillar–Modiolar Classifier built with magicgui/Qt and napari."""
+
 from __future__ import annotations
-
-"""
-GUI layer for the Pillar–Modiolar Classifier.
-
-Provides the main application window, input controls, file loading, validation,
-visualization launch, and CSV export. Styling uses a light QSS theme and
-assets resolved from the installed package.
-"""
 
 import configparser
 import os
+import textwrap
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from importlib.resources import files
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Iterable, Set
+from typing import Iterable
 
 import napari
 import pandas as pd
-import textwrap
-
 from magicgui.types import FileDialogMode
 from magicgui.widgets import (
-    Container,
-    FileEdit,
-    LineEdit,
     CheckBox,
     ComboBox,
-    PushButton,
+    Container,
+    FileEdit,
     Label,
+    LineEdit,
+    PushButton,
     TextEdit,
 )
-from qtpy.QtGui import QIcon, QPainter, QColor, QFontMetrics, QCursor
-from qtpy.QtCore import QCoreApplication, QObject, QEvent, QTimer
+from qtpy.QtCore import QEvent, QObject, QTimer
+from qtpy.QtGui import QColor, QCursor, QFontMetrics, QIcon, QPaintEvent, QPainter
 from qtpy.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QSizePolicy,
-    QStyleOptionProgressBar, QStyle, QProgressBar, QToolTip
+    QApplication,
+    QMainWindow,
+    QProgressBar,
+    QSizePolicy,
+    QStyle,
+    QStyleOptionProgressBar,
+    QToolTip,
+    QVBoxLayout,
+    QWidget,
 )
 
-from .classifier import identify_poles, build_pm_planes, build_hc_planes, classify_synapses
-from .exporter import prompt_export_dir, export_df_csv
+from .assets import resource_path
+from .classifier import build_hc_planes, build_pm_planes, classify_synapses, identify_poles
+from .exporter import export_df_csv, prompt_export_dir
 from .finder import find_groups
 from .models import FinderConfig, Group
 from .parser import parse_group
-from .processing import process_volume_df, process_position_df, merge_dfs
+from .processing import merge_dfs, process_position_df, process_volume_df
 
 
-# ---------------------------------------------------------------------------
-# Tooltip text placeholders (edit these strings to show hover help in the UI)
-# ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class TooltipText:
-    case_insensitive: str = (
-        "Ignore letter case when matching file names, extensions, and identifiers."
-    )
-    file_extension: str = (
-        "File extension of the Imaris exports."
-    )
-    ribbons_sheet_id: str = (
-        "Suffix/identifier used for presynaptic ribbon volume sheets."
-    )
-    psds_sheet_id: str = (
-        "Suffix/identifier used for glutamate-receptor patch (PSD) volume sheets."
-    )
-    positions_sheet_id: str = (
-        "Identifier for the group-level export sheet that contains object positions."
-    )
+    """Static tooltip copy for the GUI."""
+
+    case_insensitive: str = "Ignore letter case when matching file names, extensions, and identifiers."
+    file_extension: str = "File extension of the Imaris exports."
+    ribbons_sheet_id: str = "Suffix/identifier used for presynaptic ribbon volume sheets."
+    psds_sheet_id: str = "Suffix/identifier used for glutamate-receptor patch (PSD) volume sheets."
+    positions_sheet_id: str = "Identifier for the group-level export sheet that contains object positions."
     identify_poles: str = (
         "On: mark the spot closest to most synapses as basal. "
         "Off: mark the spot that was created first as apical (lower ID)."
     )
-    ribbons_only: str = (
-        "Select when no glutamate-receptor patch volumes were analyzed."
-    )
-    psds_only: str = (
-        "Select when no presynaptic ribbon volumes were analyzed."
-    )
-    update_all_fields: str = (
-        "Store all values in ‘Import’ and ‘Object names’."
-    )
-    ribbons_obj_id: str = (
-        "Object name for presynaptic ribbons in Imaris."
-    )
-    psds_obj_id: str = (
-        "Object name for glutamate-receptor patches in Imaris."
-    )
-    pillar_obj_id: str = (
-        "Object name of the spot on the pillar side of the inner hair cell in Imaris."
-    )
-    modiolar_obj_id: str = (
-        "Object name of the spot on the modiolar side of the inner hair cell "
-        "in Imaris."
-    )
+    ribbons_only: str = "Select when no glutamate-receptor patch volumes were analyzed."
+    psds_only: str = "Select when no presynaptic ribbon volumes were analyzed."
+    update_all_fields: str = "Store all values in ‘Import’ and ‘Object names’."
+    ribbons_obj_id: str = "Object name for presynaptic ribbons in Imaris."
+    psds_obj_id: str = "Object name for glutamate-receptor patches in Imaris."
+    pillar_obj_id: str = "Object name of the spot on the pillar side of the inner hair cell in Imaris."
+    modiolar_obj_id: str = "Object name of the spot on the modiolar side of the inner hair cell in Imaris."
 
-TOOLTIP_WRAP_CH = 72      # ≈ characters per line before wrapping
-TOOLTIP_DELAY_MS = 600    # delay before tooltips show (milliseconds)
+
+TOOLTIP_WRAP_CH = 72
+TOOLTIP_DELAY_MS = 600
 
 TT = TooltipText()
-# ---------------------------------------------------------------------------
-
 
 APP_WIDTH = 667
 APP_HEIGHT = 1080
@@ -169,17 +142,8 @@ CONFIG_APP = "PillarModiolarClassifier"
 CONFIG_FILENAME = "config.ini"
 
 
-
-def _resource_path(name: str) -> str:
-    return str(files(__package__).joinpath("resources", name))
-
-
-def _qss_light(
-    dropdown_png_path: str,
-    border_color: str,
-    border_radius: int,
-    border_thickness: int,
-) -> str:
+def _qss_light(dropdown_png_path: str, border_color: str, border_radius: int, border_thickness: int) -> str:
+    """Return a light QSS theme string parameterized by shared values."""
     return f"""
 QMainWindow {{ background: #F6F7F9; }}
 QWidget     {{ font-size: 10pt; }}
@@ -246,45 +210,52 @@ def _wrap_tt(text: str, width: int = TOOLTIP_WRAP_CH) -> str:
     """Soft-wrap tooltip text at roughly `width` characters."""
     return textwrap.fill(text, width=width)
 
+
 class ToolTipDelayFilter(QObject):
-    def __init__(self, delay_ms: int = TOOLTIP_DELAY_MS, parent=None):
+    """Event filter that implements a consistent tooltip delay."""
+
+    def __init__(self, delay_ms: int = TOOLTIP_DELAY_MS, parent: QObject | None = None):
+        """Initialize the filter.
+
+        Args:
+            delay_ms: Delay in milliseconds before showing tooltips.
+            parent: Optional parent QObject.
+        """
         super().__init__(parent)
-        self._delay = delay_ms
+        self._delay: int = delay_ms
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._target = None
+        self._target: QWidget | None = None
         self._timer.timeout.connect(self._show)
 
-    def eventFilter(self, obj, event):
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        """Filter tooltip-related events for the installed widgets."""
         et = event.type()
-
-        # Start our own delay on first entry/hover
         if et in (QEvent.Enter, QEvent.HoverEnter):
+            if not isinstance(obj, QWidget):
+                return False
             if not obj.toolTip():
                 return False
             self._target = obj
             self._timer.start(self._delay)
-            return False  # don't consume
-
-        # Cancel/hide on exit or interaction
+            return False
         if et in (QEvent.Leave, QEvent.HoverLeave, QEvent.FocusOut, QEvent.MouseButtonPress):
             self._timer.stop()
-            QToolTip.hideText()
+            QToolTip.showText(QCursor.pos(), "", None)
             self._target = None
             return False
-
-        # Eat the default tooltip event so Qt doesn't apply its own wake-up delay
         if et == QEvent.ToolTip:
             return True
-
         return False
 
-    def _show(self):
-        if self._target:
-            QToolTip.showText(QCursor.pos(), self._target.toolTip(), self._target)
+    def _show(self) -> None:
+        tgt = self._target
+        if tgt is not None:
+            QToolTip.showText(QCursor.pos(), tgt.toolTip(), tgt)
 
 
 def _user_config_dir() -> Path:
+    """Return and create (if missing) the user config directory."""
     base = os.environ.get("LOCALAPPDATA")
     if not base:
         base = Path.home() / "AppData" / "Local"
@@ -296,14 +267,17 @@ def _user_config_dir() -> Path:
 
 
 def _user_config_path() -> Path:
+    """Return the user config file path."""
     return _user_config_dir() / CONFIG_FILENAME
 
 
 def _legacy_config_path() -> Path:
+    """Return the legacy config path in the working directory."""
     return Path("config.ini")
 
 
-def _read_config_from(path: Path) -> Optional[configparser.ConfigParser]:
+def _read_config_from(path: Path) -> configparser.ConfigParser | None:
+    """Read a config file if it exists; return None on error or absence."""
     try:
         if not path.exists():
             return None
@@ -315,6 +289,7 @@ def _read_config_from(path: Path) -> Optional[configparser.ConfigParser]:
 
 
 def _ensure_parent_dir(p: Path) -> None:
+    """Create the parent directory for a path if needed."""
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
     except Exception:
@@ -322,14 +297,14 @@ def _ensure_parent_dir(p: Path) -> None:
 
 
 def header(text: str, gap_px: int) -> Label:
+    """Return a styled header label widget."""
     lab = Label(value=text)
-    lab.native.setStyleSheet(
-        f"font-weight: 600; font-size: 11pt; margin: 0 0 {gap_px}px 11px;"
-    )
+    lab.native.setStyleSheet(f"font-weight: 600; font-size: 11pt; margin: 0 0 {gap_px}px 11px;")
     return lab
 
 
 def vfield(caption: str, widget) -> Container:
+    """Return a vertical label+field container with consistent margins."""
     cap = Label(value=caption)
     cap.native.setStyleSheet(f"margin-bottom: {FIELD_LABEL_SP}px;")
     c = Container(widgets=[cap, widget], layout="vertical", labels=False)
@@ -339,7 +314,8 @@ def vfield(caption: str, widget) -> Container:
     return c
 
 
-def set_layout(container: Container, margins=(0, 0, 0, 0), spacing=0):
+def set_layout(container: Container, margins=(0, 0, 0, 0), spacing=0) -> None:
+    """Apply margins/spacing to a magicgui container."""
     lay = container.native.layout()
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(0)
@@ -348,20 +324,25 @@ def set_layout(container: Container, margins=(0, 0, 0, 0), spacing=0):
     lay.setSpacing(spacing)
 
 
-def equal_stretch(row_container: Container):
+def equal_stretch(row_container: Container) -> None:
+    """Ensure equal stretch factors for a row of child widgets."""
     lay = row_container.native.layout()
     for i in range(lay.count()):
         lay.setStretch(i, 1)
 
 
 def mark_group(container: Container) -> None:
+    """Mark a container as a 'group' for QSS styling."""
     container.native.setProperty("group", True)
     container.native.style().unpolish(container.native)
     container.native.style().polish(container.native)
 
 
 class ContrastProgressBar(QProgressBar):
-    def paintEvent(self, event):
+    """Progress bar that preserves text contrast over the filled chunk."""
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        """Custom paint that flips text color over the filled region."""
         opt = QStyleOptionProgressBar()
         self.initStyleOption(opt)
         original_text = opt.text
@@ -389,7 +370,10 @@ class ContrastProgressBar(QProgressBar):
 
 
 class App:
+    """Top-level GUI application controller."""
+
     def __init__(self) -> None:
+        """Create the UI, wire events, and load persisted inputs."""
         self.w_folder = FileEdit(label="Folder", mode=FileDialogMode.EXISTING_DIRECTORY, value=None)
         self.w_case_insensitive = CheckBox(label="Case insensitive", value=True)
 
@@ -398,8 +382,6 @@ class App:
         self.w_psds = LineEdit(label="", value="psd")
         self.w_positions = LineEdit(label="", value="pos")
 
-        # Removed: Remember settings checkbox
-        # New: Identify poles toggle (controls whether identify_poles runs)
         self.w_identify_poles = CheckBox(label="Identify poles", value=True)
 
         self.w_ribbons_only = CheckBox(label="Ribbons only", value=False)
@@ -418,16 +400,17 @@ class App:
         self.btn_next = PushButton(text="Next ▶")
         self.btn_assess = PushButton(text="Assess selected (open in viewer)")
 
-        self.w_export_dir = FileEdit(label="Export folder (optional)", mode=FileDialogMode.EXISTING_DIRECTORY, value=None)
+        self.w_export_dir = FileEdit(
+            label="Export folder (optional)",
+            mode=FileDialogMode.EXISTING_DIRECTORY,
+            value=None,
+        )
         self.btn_export_selected = PushButton(text="Classify and export selected to csv…")
         self.btn_export_all = PushButton(text="Classify and export all to csv…")
 
         self.txt_log = TextEdit(value="", tooltip="Logs and progress")
         self.cbo_group.native.setEditable(False)
 
-        # ---------------------------
-        # Apply tooltips from TT here
-        # ---------------------------
         self.w_case_insensitive.native.setToolTip(_wrap_tt(TT.case_insensitive))
         self.w_extensions.native.setToolTip(_wrap_tt(TT.file_extension))
         self.w_ribbons.native.setToolTip(_wrap_tt(TT.ribbons_sheet_id))
@@ -442,10 +425,7 @@ class App:
         self.w_pillar_obj.native.setToolTip(_wrap_tt(TT.pillar_obj_id))
         self.w_modiolar_obj.native.setToolTip(_wrap_tt(TT.modiolar_obj_id))
 
-
-        # ---------------------------
-
-        def _min_w(widget, w, expanding=False):
+        def _min_w(widget, w: int, expanding: bool = False) -> None:
             widget.native.setMinimumWidth(w)
             if expanding:
                 widget.native.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -456,12 +436,7 @@ class App:
         _min_w(self.w_export_dir, EXPORT_PATH_MIN_W, expanding=True)
         for lew in (self.w_extensions, self.w_ribbons, self.w_psds, self.w_positions):
             _min_w(lew, IMPORT_FIELD_MIN_W, expanding=True)
-        for lew in (
-            self.w_ribbons_obj,
-            self.w_psds_obj,
-            self.w_pillar_obj,
-            self.w_modiolar_obj,
-        ):
+        for lew in (self.w_ribbons_obj, self.w_psds_obj, self.w_pillar_obj, self.w_modiolar_obj):
             _min_w(lew, OBJECT_FIELD_MIN_W, expanding=True)
 
         for b, w in ((self.btn_prev, NAV_BTN_W), (self.btn_next, NAV_BTN_W), (self.btn_assess, ASSESS_BTN_W)):
@@ -502,7 +477,6 @@ class App:
         right_buttons = Container(widgets=[self.btn_update_all, self.btn_load], layout="horizontal", labels=False)
         set_layout(right_buttons, margins=(0, 0, 0, 0), spacing=ACTION_BUTTONS_GAP)
 
-        # Filters row: Identify poles + ribbons/psds toggles + action buttons
         import_filters_row = Container(
             widgets=[self.w_identify_poles, self.w_ribbons_only, self.w_psds_only, right_buttons],
             layout="horizontal",
@@ -533,11 +507,7 @@ class App:
         set_layout(object_row, margins=M_OBJECTS_ROW, spacing=S_OBJECTS_OBJECTS)
         equal_stretch(object_row)
 
-        grp_objects = Container(
-            widgets=[header("Object names", SPC_OBJECTS), object_row],
-            layout="vertical",
-            labels=False,
-        )
+        grp_objects = Container(widgets=[header("Object names", SPC_OBJECTS), object_row], layout="vertical", labels=False)
         set_layout(grp_objects, margins=GROUP_MARGINS, spacing=ROW_OBJECTS_SPACING)
         mark_group(grp_objects)
 
@@ -551,11 +521,7 @@ class App:
         lay.insertStretch(0, 1)
         lay.addStretch(1)
 
-        grp_nav = Container(
-            widgets=[header("Loaded IDs", SPC_NAV), loaded_row, nav_buttons],
-            layout="vertical",
-            labels=False,
-        )
+        grp_nav = Container(widgets=[header("Loaded IDs", SPC_NAV), loaded_row, nav_buttons], layout="vertical", labels=False)
         set_layout(grp_nav, margins=GROUP_MARGINS, spacing=ROW_NAV_SPACING)
         mark_group(grp_nav)
 
@@ -577,11 +543,7 @@ class App:
         log_text_row = Container(widgets=[self.txt_log], layout="horizontal", labels=False)
         log_text_row.native.setContentsMargins(*M_LOG_TEXT_ROW)
 
-        grp_log = Container(
-            widgets=[header("Log", SPC_LOG), log_text_row],
-            layout="vertical",
-            labels=False,
-        )
+        grp_log = Container(widgets=[header("Log", SPC_LOG), log_text_row], layout="vertical", labels=False)
         set_layout(grp_log, margins=LOG_GROUP_MARGINS, spacing=ROW_EXPORT_SPACING)
         mark_group(grp_log)
 
@@ -613,55 +575,46 @@ class App:
         wrap_layout.addWidget(self._progress)
         grp_log.native.layout().insertWidget(2, self._progress_wrap)
 
-        self.panel = Container(
-            widgets=[grp_import, grp_objects, grp_nav, grp_export, grp_log],
-            layout="vertical",
-            labels=False,
-        )
+        self.panel = Container(widgets=[grp_import, grp_objects, grp_nav, grp_export, grp_log], layout="vertical", labels=False)
         set_layout(self.panel, margins=MARGINS_APP_AREA, spacing=BETWEEN_CARD_PADDING)
 
-        # Install a single delay filter on all tooltip-bearing widgets
         self._tt_filter = ToolTipDelayFilter(parent=self.panel.native)
         for w in [
-            self.w_case_insensitive.native, self.w_extensions.native,
+            self.w_case_insensitive.native,
+            self.w_extensions.native,
             self.w_ribbons.native,
-            self.w_psds.native, self.w_positions.native,
+            self.w_psds.native,
+            self.w_positions.native,
             self.w_identify_poles.native,
-            self.w_ribbons_only.native, self.w_psds_only.native,
+            self.w_ribbons_only.native,
+            self.w_psds_only.native,
             self.btn_update_all.native,
-            self.w_ribbons_obj.native, self.w_psds_obj.native,
+            self.w_ribbons_obj.native,
+            self.w_psds_obj.native,
             self.w_pillar_obj.native,
-            self.w_modiolar_obj.native
+            self.w_modiolar_obj.native,
         ]:
             w.installEventFilter(self._tt_filter)
 
         self.cbo_group.native.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.txt_log.native.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self.cfg: Optional[FinderConfig] = None
-        self.groups: Dict[str, Group] = {}
-        self.df_cache: Dict[str, pd.DataFrame] = {}
-        self.current_viewer: Optional[napari.Viewer] = None
-        self._window: Optional[QMainWindow] = None
-        self._progress_total: Optional[int] = None
+        self.cfg: FinderConfig | None = None
+        self.groups: dict[str, Group] = {}
+        self.df_cache: dict[str, pd.DataFrame] = {}
+        self.current_viewer: napari.Viewer | None = None
+        self._window: QMainWindow | None = None
+        self._progress_total: int | None = None
         self._progress_value: int = 0
 
         self._load_persisted_inputs()
         self.cfg = self._snap_cfg()
 
         self._wire_return_updates()
-        self.w_ribbons_only.changed.connect(
-            lambda v: self._checkbox_update("ribbons_only", "Ribbons only", bool(v), invalidate=True)
-        )
-        self.w_psds_only.changed.connect(
-            lambda v: self._checkbox_update("psds_only", "PSDs only", bool(v), invalidate=True)
-        )
-        self.w_identify_poles.changed.connect(
-            lambda v: self._checkbox_update("identify_poles", "Identify poles", bool(v))
-        )
-        self.w_case_insensitive.changed.connect(
-            lambda v: self._checkbox_update("case_insensitive", "Case insensitive", bool(v))
-        )
+        self.w_ribbons_only.changed.connect(lambda v: self._checkbox_update("ribbons_only", "Ribbons only", bool(v), invalidate=True))
+        self.w_psds_only.changed.connect(lambda v: self._checkbox_update("psds_only", "PSDs only", bool(v), invalidate=True))
+        self.w_identify_poles.changed.connect(lambda v: self._checkbox_update("identify_poles", "Identify poles", bool(v)))
+        self.w_case_insensitive.changed.connect(lambda v: self._checkbox_update("case_insensitive", "Case insensitive", bool(v)))
 
         self._update_mode_ui()
 
@@ -674,14 +627,22 @@ class App:
         self.btn_next.changed.connect(lambda *_: self.on_next())
 
     def log(self, *args) -> None:
+        """Append a log line with timestamp to the log panel."""
         ts = datetime.now().strftime("%H:%M:%S")
         msg = " ".join(str(a) for a in args)
         line = f"{ts} | {msg}"
         prev = self.txt_log.value or ""
-        self.txt_log.value = (line + "\n" + prev)
+        self.txt_log.value = line + "\n" + prev
         self.txt_log.native.verticalScrollBar().setValue(0)
 
-    def _progress_start(self, title: str, total: Optional[int] = None) -> None:
+    def _process_events(self) -> None:
+        """Safely flush the Qt event loop (instance method form)."""
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+
+    def _progress_start(self, title: str, total: int | None = None) -> None:
+        """Start a progress section with an optional determinate range."""
         self._progress_total = total
         self._progress_value = 0
         self._progress.show()
@@ -691,9 +652,10 @@ class App:
             self._progress.setRange(0, total)
             self._progress.setValue(0)
         self._progress.setFormat(f"{title} %p%")
-        QCoreApplication.processEvents()
+        self._process_events()
 
-    def _progress_tick(self, message: Optional[str] = None) -> None:
+    def _progress_tick(self, message: str | None = None) -> None:
+        """Advance progress by one step and optionally log a message."""
         if self._progress_total is None:
             return
         self._progress_value += 1
@@ -701,20 +663,21 @@ class App:
         if message:
             self._progress.setFormat(f"{message} %p%")
             self.log(message)
-        QCoreApplication.processEvents()
+        self._process_events()
 
-    def _progress_finish(self, message: Optional[str] = None) -> None:
+    def _progress_finish(self, message: str | None = None) -> None:
+        """Finish progress display and reset internal counters."""
         if message:
             self._progress.setFormat(message)
         self._progress.setRange(0, 1)
         self._progress.setValue(1)
-        QCoreApplication.processEvents()
+        self._process_events()
         self._progress.hide()
         self._progress_total = None
         self._progress_value = 0
 
     def _remember_enabled(self) -> bool:
-        """Read remember_input_fields from config.ini (default True)."""
+        """Return whether input persistence is enabled (default True)."""
         cp = _read_config_from(_user_config_path())
         try:
             if cp is None:
@@ -724,7 +687,7 @@ class App:
             return True
 
     def _persist_inputs_if_enabled(self) -> None:
-        # Governed by config flag (no GUI toggle). Default True.
+        """Persist current input fields to the user config when allowed."""
         if not (self.cfg and self.cfg.remember_input_fields):
             return
         cfg_path = _user_config_path()
@@ -745,12 +708,12 @@ class App:
             cp.write(f)
 
     def _load_persisted_inputs(self) -> None:
+        """Load input values from the user config, migrating legacy files if needed."""
         user_cfg = _read_config_from(_user_config_path())
         if user_cfg is None:
-            # First launch: create config.ini with sane defaults (remember=True, identify_poles=True)
             cp = configparser.ConfigParser()
             cp["inputs"] = {}
-            snap = asdict(FinderConfig(folder=Path(".")))  # defaults include remember_input_fields=True, identify_poles=True
+            snap = asdict(FinderConfig(folder=Path(".")))
             snap["folder"] = str(Path("."))
             for k, v in snap.items():
                 cp["inputs"][k] = str(v)
@@ -763,7 +726,6 @@ class App:
                 pass
             user_cfg = cp
         else:
-            # Optional: migrate legacy top-level config.ini if present
             legacy = _read_config_from(_legacy_config_path())
             if legacy is not None:
                 try:
@@ -779,7 +741,7 @@ class App:
             return
         sec = user_cfg["inputs"]
 
-        def _set(le: LineEdit, key: str, default: str):
+        def _set(le: LineEdit, key: str, default: str) -> None:
             le.native.setText(sec.get(key, fallback=default))
 
         folder_txt = sec.get("folder", fallback="")
@@ -799,11 +761,11 @@ class App:
         self.w_case_insensitive.value = sec.getboolean("case_insensitive", fallback=True)
         self.w_ribbons_only.value = sec.getboolean("ribbons_only", fallback=False)
         self.w_psds_only.value = sec.getboolean("psds_only", fallback=False)
-        # New flag: Identify poles (default True)
         self.w_identify_poles.value = sec.getboolean("identify_poles", fallback=True)
         self._update_mode_ui()
 
     def _update_mode_ui(self) -> None:
+        """Enable/disable inputs based on ribbons-only or PSDs-only toggles."""
         rib_only = bool(self.w_ribbons_only.value)
         psd_only = bool(self.w_psds_only.value)
         self.w_psds.enabled = not rib_only
@@ -812,10 +774,12 @@ class App:
         self.w_ribbons_obj.enabled = not psd_only
 
     def _get_text(self, widget: LineEdit) -> str:
+        """Return trimmed text from a ``LineEdit`` widget."""
         return widget.native.text().strip()
 
     def _wire_return_updates(self) -> None:
-        mapping = {
+        """Apply edits on Enter for relevant fields, with cache invalidation rules."""
+        mapping: dict[LineEdit, tuple[str, str, bool]] = {
             self.w_extensions: ("extensions", "File extension", True),
             self.w_ribbons: ("ribbons", "Ribbon volume sheet ID", True),
             self.w_psds: ("psds", "PSD volume sheet ID", True),
@@ -827,12 +791,11 @@ class App:
         }
         for widget, (attr, label, invalidate) in mapping.items():
             widget.native.returnPressed.connect(
-                lambda w=widget, a=attr, lbl=label, inv=invalidate: self._apply_edit_update(
-                    w, a, lbl, invalidate=inv
-                )
+                lambda w=widget, a=attr, lbl=label, inv=invalidate: self._apply_edit_update(w, a, lbl, invalidate=inv)
             )
 
     def _apply_edit_update(self, widget: LineEdit, cfg_attr: str, label: str, *, invalidate: bool) -> None:
+        """Persist a text edit, optionally invalidating caches."""
         value = self._get_text(widget)
         if self.cfg is None:
             self.cfg = self._snap_cfg()
@@ -843,6 +806,7 @@ class App:
         self.log(f"{label} changed to '{value}'")
 
     def _checkbox_update(self, cfg_attr: str, label: str, state: bool, *, invalidate: bool = False) -> None:
+        """Persist a checkbox change, optionally invalidating caches."""
         if self.cfg is None:
             self.cfg = self._snap_cfg()
         if cfg_attr == "ribbons_only" and state and self.w_psds_only.value:
@@ -857,14 +821,17 @@ class App:
         self.log(f"{label} {'enabled' if state else 'disabled'}")
 
     def on_update_all_fields(self) -> None:
+        """Apply all current UI fields to the live configuration."""
         self.cfg = self._snap_cfg()
         self._persist_inputs_if_enabled()
         self.log("All fields updated")
 
     def _invalidate_cache(self) -> None:
+        """Clear the per-group dataframe cache."""
         self.df_cache.clear()
 
     def _snap_cfg(self) -> FinderConfig:
+        """Snapshot current UI values into a ``FinderConfig`` instance."""
         folder_path = Path(self.w_folder.value) if self.w_folder.value else Path(".")
         return FinderConfig(
             folder=folder_path,
@@ -884,6 +851,7 @@ class App:
         )
 
     def _make_cfg(self) -> FinderConfig:
+        """Construct a ``FinderConfig`` from UI values with basic validation."""
         folder_v = self.w_folder.value
         if folder_v is None:
             raise ValueError("Please select a folder.")
@@ -905,9 +873,10 @@ class App:
             remember_input_fields=self._remember_enabled(),
         )
 
-    def _found_suffix_tokens(self, folder: Path, extension: str, tokens: Iterable[str], ci: bool) -> Set[str]:
+    def _found_suffix_tokens(self, folder: Path, extension: str, tokens: Iterable[str], ci: bool) -> set[str]:
+        """Return which suffix tokens are present in a folder for the given extension."""
         ext = extension.lower()
-        found: Set[str] = set()
+        found: set[str] = set()
         for p in folder.iterdir():
             if not p.is_file():
                 continue
@@ -925,12 +894,17 @@ class App:
         return found
 
     def _verify_required_filename_tokens(self, cfg: FinderConfig) -> None:
+        """Verify that required tokenized files exist in the selected folder.
+
+        Raises:
+            RuntimeError: If any required token cannot be found.
+        """
         token_labels = {
             cfg.ribbons: "Ribbon volume sheet ID",
             cfg.psds: "PSD volume sheet ID",
             cfg.positions: "Position sheet ID",
         }
-        tokens_to_check = []
+        tokens_to_check: list[str] = []
         if not cfg.psds_only:
             tokens_to_check.append(cfg.ribbons)
         if not cfg.ribbons_only:
@@ -946,7 +920,8 @@ class App:
             ]
             raise RuntimeError("\n".join(lines))
 
-    def _build_df_for_group(self, gid: str) -> Tuple[pd.DataFrame, object]:
+    def _build_df_for_group(self, gid: str) -> tuple[pd.DataFrame, object]:
+        """Build the processed dataframe and plane bundles for a group id."""
         if gid not in self.groups:
             raise KeyError(f"Unknown group id: {gid}")
         g = self.groups[gid]
@@ -960,16 +935,14 @@ class App:
         if self.cfg.identify_poles:
             df = identify_poles(df, self.cfg)
 
-        pm_bundle = build_pm_planes(df, self.cfg)  # (pm_polys, pm_labels)
-        hc_bundle = build_hc_planes(df, self.cfg)  # (hc_polys, hc_labels)
+        pm_bundle = build_pm_planes(df, self.cfg)
+        hc_bundle = build_hc_planes(df, self.cfg)
 
         df = classify_synapses(df, self.cfg, pm_bundle, hc_bundle)
-
-        # Return both bundles so the visualizer can get exact label mapping
         return df, (pm_bundle, hc_bundle)
 
-    def _ensure_required_objects_in_df(self, df: pd.DataFrame,
-                                       cfg: FinderConfig, gid: str) -> pd.DataFrame:
+    def _ensure_required_objects_in_df(self, df: pd.DataFrame, cfg: FinderConfig, gid: str) -> str:
+        """Ensure that required object categories exist; return a summary message."""
         if "object" not in df.columns:
             raise RuntimeError("Expected column 'object' not found in data.")
 
@@ -978,7 +951,7 @@ class App:
             return s.lower() if cfg.case_insensitive else s
 
         present = {_norm(x) for x in df["object"].astype(str).unique()}
-        required_map = {
+        required_map: dict[str, str] = {
             "Pillar object ID": cfg.pillar_obj,
             "Modiolar object ID": cfg.modiolar_obj,
         }
@@ -986,16 +959,14 @@ class App:
             required_map["Ribbon object ID"] = cfg.ribbons_obj
         if not cfg.ribbons_only:
             required_map["PSDs object ID"] = cfg.psds_obj
-        missing_msgs = []
+        missing_msgs: list[str] = []
         group_files: list[str] = []
         if gid in self.groups:
             group_files = [Path(p).name for p in self.groups[gid].file_paths.values()]
         for label, val in required_map.items():
             if _norm(val) not in present:
                 if group_files:
-                    missing_msgs.append(
-                        f"{label} '{val}' not found in any loaded file(s): " + ", ".join(group_files)
-                    )
+                    missing_msgs.append(f"{label} '{val}' not found in any loaded file(s): " + ", ".join(group_files))
                 else:
                     missing_msgs.append(f"{label} '{val}' not found in dataset.")
         if missing_msgs:
@@ -1004,16 +975,18 @@ class App:
         n_rib = len(df.loc[df["object"] == "Unclassified " + cfg.ribbons_obj])
         n_psd = len(df.loc[df["object"] == "Unclassified " + cfg.psds_obj])
 
-        msg = (f"{n_rib} ribbon(s) and {n_psd} PSD(s) were not "
-               f"allocated to any IHCs and are excluded from classification.")
+        msg = f"{n_rib} ribbon(s) and {n_psd} PSD(s) were not allocated to any IHCs and are excluded from classification."
         return msg
 
-    def _confirm_export_dir(self) -> Optional[Path]:
-        if str(self.w_export_dir.value) != ".":
-            return Path(self.w_export_dir.value)
+    def _confirm_export_dir(self) -> Path | None:
+        """Return the selected export directory, prompting if empty."""
+        val = self.w_export_dir.value
+        if val and str(val) != ".":
+            return Path(val)
         return prompt_export_dir()
 
     def _safe_close_viewer(self) -> None:
+        """Close the existing viewer if present, ignoring errors."""
         v = self.current_viewer
         self.current_viewer = None
         if not v:
@@ -1024,6 +997,7 @@ class App:
             pass
 
     def on_load_groups(self) -> None:
+        """Load and index groups from the selected folder."""
         self.cfg = self._make_cfg()
         self._persist_inputs_if_enabled()
         try:
@@ -1040,6 +1014,7 @@ class App:
             self.log(f"[error] Identify files: {e}")
 
     def on_assess_selected(self) -> None:
+        """Open the currently selected group in the napari viewer."""
         self.cfg = self._make_cfg()
         self._persist_inputs_if_enabled()
         gid = self.cbo_group.value
@@ -1053,8 +1028,8 @@ class App:
                 df = self.df_cache[gid]
                 if self.cfg.identify_poles:
                     df = identify_poles(df, self.cfg)
-                pm_bundle = build_pm_planes(df, self.cfg)  # (pm_polys, pm_labels)
-                hc_bundle = build_hc_planes(df, self.cfg)  # (hc_polys, hc_labels)
+                pm_bundle = build_pm_planes(df, self.cfg)
+                hc_bundle = build_hc_planes(df, self.cfg)
                 self._progress_tick()
                 msg = self._ensure_required_objects_in_df(df, self.cfg, gid)
                 self._progress_tick()
@@ -1076,7 +1051,7 @@ class App:
                 self._progress_tick(msg)
                 if self.cfg.identify_poles:
                     df = identify_poles(df, self.cfg)
-                pm_bundle = build_pm_planes(df, self.cfg)  # (pm_polys, pm_labels)
+                pm_bundle = build_pm_planes(df, self.cfg)
                 hc_bundle = build_hc_planes(df, self.cfg)
                 df = classify_synapses(df, self.cfg, pm_bundle, hc_bundle)
                 self._progress_tick("Classified synapses.")
@@ -1109,15 +1084,16 @@ class App:
         self.log(f"Opened group '{gid}' in napari.")
 
     def _open_viewer(self, df: pd.DataFrame, plane_bundles) -> napari.Viewer:
+        """Create or reuse a viewer and draw the current dataset."""
         from .visualizer import draw_objects
-        reuse = self.current_viewer if (
-            self.current_viewer is not None and getattr(self.current_viewer, "window", None) is not None
-        ) else None
+
+        reuse = self.current_viewer if (self.current_viewer is not None and getattr(self.current_viewer, "window", None) is not None) else None
         pm_bundle, hc_bundle = plane_bundles
         viewer = draw_objects(df, self.cfg, pm_bundle, hc_bundle, viewer=reuse)
         return viewer
 
     def on_export_selected(self) -> None:
+        """Classify and export the currently selected group to CSV."""
         self.cfg = self._make_cfg()
         self._persist_inputs_if_enabled()
         gid = self.cbo_group.value
@@ -1146,6 +1122,7 @@ class App:
             self.log(f"[error] Export failed for '{gid}': {e}")
 
     def on_export_all(self) -> None:
+        """Classify and export all loaded groups to CSV."""
         self.cfg = self._make_cfg()
         self._persist_inputs_if_enabled()
         if not self.groups:
@@ -1174,6 +1151,7 @@ class App:
         self.log(f"Finished export: {ok}/{total} succeeded.")
 
     def on_prev(self) -> None:
+        """Navigate to the previous loaded group and open it."""
         choices = list(self.cbo_group.choices or [])
         if not choices:
             return
@@ -1183,6 +1161,7 @@ class App:
             self.on_assess_selected()
 
     def on_next(self) -> None:
+        """Navigate to the next loaded group and open it."""
         choices = list(self.cbo_group.choices or [])
         if not choices:
             return
@@ -1192,10 +1171,11 @@ class App:
             self.on_assess_selected()
 
     def show(self) -> None:
+        """Create and show the main window if needed."""
         if getattr(self, "_window", None) is None:
             self._window = QMainWindow()
             self._window.setWindowTitle("Pillar–Modiolar Classifier")
-            icon_path = _resource_path("icon.ico")
+            icon_path = resource_path("icon.ico")
             self._window.setWindowIcon(QIcon(icon_path))
             central = QWidget(self._window)
             lay = QVBoxLayout(central)
@@ -1205,7 +1185,7 @@ class App:
             self._window.setCentralWidget(central)
             self._window.resize(APP_WIDTH, APP_HEIGHT)
             self._window.setMinimumSize(APP_WIDTH, APP_HEIGHT)
-            chev = _resource_path("chevron_down.png").replace("\\", "/")
+            chev = resource_path("chevron_down.png").replace("\\", "/")
             arrow_path = f'url("{chev}")'
             self._window.setStyleSheet(
                 _qss_light(
@@ -1219,6 +1199,7 @@ class App:
 
 
 def launch_gui() -> None:
+    """Launch the GUI and start the napari event loop."""
     app = App()
     app.show()
     napari.run()

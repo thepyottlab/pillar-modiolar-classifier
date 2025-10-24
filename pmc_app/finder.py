@@ -1,3 +1,5 @@
+"""Filename-based discovery of group IDs and tokenized file sets."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -8,6 +10,11 @@ from .models import FinderConfig, Group, InputMode
 
 
 def _found_suffix_tokens(folder: Path, extension: str, tokens: Iterable[str], ci: bool) -> Set[str]:
+    """Return which tokens are present as suffixes in the folder.
+
+    A token is considered present if a file stem ends with ``" " + token`` and
+    the extension matches ``extension``.
+    """
     ext = extension.lower()
     found: Set[str] = set()
     for p in folder.iterdir():
@@ -15,29 +22,22 @@ def _found_suffix_tokens(folder: Path, extension: str, tokens: Iterable[str], ci
             stem = p.stem
             for s in tokens:
                 token = f" {s}"
-                if (stem.lower().endswith(token.lower()) if ci else stem.endswith(token)):
+                if stem.lower().endswith(token.lower()) if ci else stem.endswith(token):
                     found.add(s)
     return found
 
 
 def find_groups(cfg: FinderConfig) -> Dict[str, Group]:
-    """Scan the folder and group files by base id.
+    """Group files by base identifier given the configured suffix tokens.
 
-    Rules:
-    - A file named "XYZ ribbon.xls" has base id "XYZ" and token "ribbon".
-    - Only files matching cfg.extensions are considered.
-
-    Args:
-        cfg: Discovery configuration.
-
-    Returns:
-        Mapping of group id -> Group(file_paths[token] = Path)
+    Files are grouped by the part of the filename that precedes a space and a
+    known token (e.g., ``"XYZ rib.xls"`` → base id ``"XYZ"``, token ``"rib"``).
     """
     folder = Path(cfg.folder)
     allowed_ext = {cfg.extensions.lower()}
     temp = defaultdict(dict)
 
-    tokens = []
+    tokens: list[str] = []
     if cfg.mode in (InputMode.BOTH, InputMode.RIBBONS_ONLY):
         tokens.append(cfg.ribbons)
     if cfg.mode in (InputMode.BOTH, InputMode.PSDS_ONLY):
@@ -50,10 +50,9 @@ def find_groups(cfg: FinderConfig) -> Dict[str, Group]:
         stem = p.stem
         for s in tokens:
             token = f" {s}"
-            if (stem.lower().endswith(token.lower()) if cfg.case_insensitive else stem.endswith(token)):
-                id_part = stem[: -len(token)]
-                temp[id_part][s] = p
+            if stem.lower().endswith(token.lower()) if cfg.case_insensitive else stem.endswith(token):
+                gid = stem[: -len(token)]
+                temp[gid][s] = p
                 break
 
-    groups = {gid: Group(id=gid, file_paths=dict(paths)) for gid, paths in temp.items()}
-    return groups
+    return {gid: Group(id=gid, file_paths=dict(paths)) for gid, paths in temp.items()}

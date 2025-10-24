@@ -1,3 +1,5 @@
+"""Module entry-point for `python -m pmc_app`."""
+
 from __future__ import annotations
 
 from .gui import launch_gui
