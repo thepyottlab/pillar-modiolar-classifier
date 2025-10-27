@@ -230,25 +230,22 @@ class ToolTipDelayFilter(QObject):
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         """Filter tooltip-related events for the installed widgets."""
-        et = event.type()
-        if et in (QEvent.Enter, QEvent.HoverEnter):
-            if not isinstance(obj, QWidget):
-                return False
-            if not obj.toolTip():
-                return False
-            self._target = obj
-            self._timer.start(self._delay)
+        t = event.type()
+
+        if t in (QEvent.Enter, QEvent.HoverEnter):
+            text = getattr(obj, "toolTip", lambda: "")()
+            if text:
+                self._target = obj
+                self._timer.start(self._delay)
             return False
-        if et in (QEvent.Leave, QEvent.HoverLeave, QEvent.FocusOut, QEvent.MouseButtonPress):
-            self._timer.stop()
-            QToolTip.showText(QCursor.pos(), "", None)
-            self._target = None
-            return False
-        if et == QEvent.ToolTip:
+
+        if t == QEvent.ToolTip:
             return True
+
         return False
 
     def _show(self) -> None:
+        """Show the delayed tooltip for the current target, if any."""
         tgt = self._target
         if tgt is not None:
             QToolTip.showText(QCursor.pos(), tgt.toolTip(), tgt)
@@ -884,7 +881,7 @@ class App:
                 continue
             stem = p.stem
             for s in tokens:
-                token = f" {s}"
+                token = f"{s}"
                 if ci:
                     if stem.lower().endswith(token.lower()):
                         found.add(s)
