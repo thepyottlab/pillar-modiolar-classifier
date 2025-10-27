@@ -7,11 +7,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import Dict
 
 
 class InputMode(Enum):
     """Input mode determining which datasets are required and visible."""
+
     BOTH = auto()
     RIBBONS_ONLY = auto()
     PSDS_ONLY = auto()
@@ -81,5 +81,6 @@ class Group:
         id: Base identifier (e.g., the shared stem before the suffix token).
         file_paths: Mapping of role -> path. Roles are "ribbons" | "psds" | "positions".
     """
+
     id: str
-    file_paths: Dict[str, Path]
+    file_paths: dict[str, Path]

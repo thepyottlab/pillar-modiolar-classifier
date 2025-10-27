@@ -44,7 +44,7 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
     return df[existing].copy()
 
 
-def process_position_df(df: pd.DataFrame, cfg: FinderConfig) -> pd.DataFrame:
+def process_position_df(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize 'Position' sheet columns and derive apical/basal marks.
 
     We keep coordinates as (pos_x, pos_y, pos_z) and infer IHC labels from
@@ -52,7 +52,6 @@ def process_position_df(df: pd.DataFrame, cfg: FinderConfig) -> pd.DataFrame:
 
     Args:
         df: Raw 'Position' sheet.
-        cfg: Finder configuration (currently unused; kept for symmetry).
 
     Returns:
         pd.DataFrame: Normalized positions with inferred 'ihc_label' and apical/basal tags.

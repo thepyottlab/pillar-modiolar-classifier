@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 from .models import Group
 
 
@@ -30,6 +28,6 @@ class GroupValidationError(PmcError):
         groups: The dict of valid groups that *did* pass validation.
     """
 
-    def __init__(self, message: str, groups: Optional[Dict[str, Group]] = None) -> None:
+    def __init__(self, message: str, groups: dict[str, Group] | None = None) -> None:
         super().__init__(message)
-        self.groups: Dict[str, Group] = groups or {}
+        self.groups: dict[str, Group] = groups or {}

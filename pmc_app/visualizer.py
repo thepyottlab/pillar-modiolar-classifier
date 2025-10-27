@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 from weakref import WeakKeyDictionary
 
@@ -11,10 +13,10 @@ import pandas as pd
 from magicgui.widgets import CheckBox, Container, PushButton
 from numpy.typing import NDArray
 
-_VIEWER_STATE = WeakKeyDictionary()
+_VIEWER_STATE: WeakKeyDictionary[napari.Viewer, dict[str, Any]] = WeakKeyDictionary()
 
 
-def _state_for(viewer: napari.Viewer):
+def _state_for(viewer: napari.Viewer) -> dict[str, Any]:
     """Return (and lazily create) a per-viewer state dict."""
     st = _VIEWER_STATE.get(viewer)
     if st is None:
@@ -23,28 +25,24 @@ def _state_for(viewer: napari.Viewer):
     return st
 
 
-def _cleanup_viewer(viewer: napari.Viewer):
+def _cleanup_viewer(viewer: napari.Viewer) -> None:
     """Remove previously added docks and clear layers if possible."""
     st = _state_for(viewer)
     for w in list(st.get("docks", [])):
-        try:
+        with suppress(Exception):
             viewer.window.remove_dock_widget(w)
-        except Exception:
-            pass
     st["docks"].clear()
-    try:
+    with suppress(Exception):
         viewer.layers.clear()
-    except Exception:
-        pass
 
 
 def draw_objects(
     df: pd.DataFrame,
-    cfg,
+    cfg: Any,
     pm_bundle: tuple[list[np.ndarray], list[str]] | None,
-    hc_bundle: tuple[list[np.ndarray], list[str]] | None = None,
-    viewer: napari.Viewer | None = None,
-):
+    hc_bundle: tuple[list[np.ndarray], list[str]] | None,
+    viewer: napari.Viewer | None,
+) -> napari.Viewer:
     """Render the dataset and PM/HC planes into a napari viewer.
 
     Args:
@@ -60,31 +58,34 @@ def draw_objects(
     if viewer is None:
         viewer = napari.Viewer(ndisplay=3)
     else:
-        try:
+        with suppress(Exception):
             viewer.dims.ndisplay = 3
-        except Exception:
-            pass
         _cleanup_viewer(viewer)
+
+    pm_planes: list[np.ndarray]
+    pm_labels: list[str]
 
     if pm_bundle is None:
         pm_planes, pm_labels = [], []
     else:
         pm_planes, pm_labels = pm_bundle
 
+    hc_planes: list[np.ndarray]
+    hc_labels: list[str]
     if hc_bundle is None:
         hc_planes, hc_labels = [], []
     else:
         hc_planes, hc_labels = hc_bundle
 
     pm_label_to_idx: dict[str, int] = {}
-    for i, l in enumerate(pm_labels):
-        k = str(l).strip()
+    for i, label in enumerate(pm_labels):
+        k = str(label).strip()
         if k and k not in pm_label_to_idx:
             pm_label_to_idx[k] = i
 
     hc_label_to_idx: dict[str, int] = {}
-    for i, l in enumerate(hc_labels):
-        k = str(l).strip()
+    for i, label in enumerate(hc_labels):
+        k = str(label).strip()
         if k and k not in hc_label_to_idx:
             hc_label_to_idx[k] = i
 
@@ -163,14 +164,14 @@ def draw_objects(
             return np.array([0.0, 0.0, 1.0], float), a0
         return n / nn, a0
 
-    def pm_normal_for_label(lab_str: str):
+    def pm_normal_for_label(lab_str: str) -> tuple[np.ndarray, np.ndarray] | None:
         """Lookup PM plane normal by IHC label."""
         i = pm_label_to_idx.get(lab_str)
         if i is None or i >= len(pm_planes):
             return None
         return plane_normal(pm_planes[i])
 
-    def hc_normal_for_label(lab_str: str):
+    def hc_normal_for_label(lab_str: str) -> tuple[np.ndarray, np.ndarray] | None:
         """Lookup HC plane normal by IHC label."""
         i = hc_label_to_idx.get(lab_str)
         if i is None or i >= len(hc_planes):
@@ -226,7 +227,12 @@ def draw_objects(
             return 2.0
         return 1.0
 
-    def update_points(layer, pts: NDArray[np.float64], sizes, colors: NDArray[np.float32]):
+    def update_points(
+        layer: napari.layers.Points,
+        pts: NDArray[np.float64],
+        sizes: Any,
+        colors: NDArray[np.float32],
+    ) -> None:
         """Batch-update a points layer without intermediate repaints."""
         with layer.events.blocker_all():
             layer.data = pts
@@ -235,13 +241,13 @@ def draw_objects(
             layer.border_color = colors
         layer.refresh()
 
-    def update_shapes(layer, data_list):
+    def update_shapes(layer: napari.layers.Shapes, data_list: list[np.ndarray]) -> None:
         """Batch-update a shapes layer."""
         with layer.events.blocker_all():
             layer.data = data_list
         layer.refresh()
 
-    def update_vectors(layer, data):
+    def update_vectors(layer: napari.layers.Vectors | None, data: np.ndarray) -> None:
         """Batch-update a vectors layer."""
         if layer is None:
             return
@@ -249,7 +255,11 @@ def draw_objects(
             layer.data = data
         layer.refresh()
 
-    def update_label_points(layer, pos3, labels_txt):
+    def update_label_points(
+        layer: napari.layers.Points | None,
+        pos3: NDArray[np.float64] | np.ndarray,
+        labels_txt: list[str] | None,
+    ) -> None:
         """Batch-update a points layer used as stand-ins for text labels."""
         if layer is None:
             return
@@ -260,40 +270,46 @@ def draw_objects(
             pos3 = np.zeros((0, 3), float)
         n = int(pos3.shape[0])
         if labels_txt is None:
-            lab = [""] * n
+            lab: list[str] = [""] * n
         else:
-            lab = [
-                "" if (x is None or (isinstance(x, float) and not np.isfinite(x))) else str(x)
-                for x in labels_txt
-            ]
+
+            def _to_label(x: object) -> str:
+                if x is None:
+                    return ""
+                if isinstance(x, float | np.floating) and not np.isfinite(x):
+                    return ""
+                s = str(x)
+                return "" if s.lower() in {"nan", "none"} else s
+
+            lab = [_to_label(x) for x in labels_txt]
             if len(lab) != n:
                 lab = lab[:n] if len(lab) > n else lab + [""] * (n - len(lab))
         prev_vis = bool(getattr(layer.text, "visible", True))
         with layer.events.blocker_all():
-            try:
+            with suppress(Exception):
                 layer.text.visible = False
-            except Exception:
-                pass
             layer.data = pos3
             layer.text.string = {"array": lab}
-            try:
+            with suppress(Exception):
                 layer.text.visible = prev_vis
-            except Exception:
-                pass
         layer.refresh()
 
     point_layers: dict[str, Any] = {}
     user_vis: dict[str, bool] = {}
     vis_prog = False
 
-    def bind_user_vis(layer, key: str, seed_from_layer: bool = True):
+    def bind_user_vis(
+        layer: napari.layers.Layer | None, key: str, seed_from_layer: bool = True
+    ) -> None:
         """Track user-driven visibility changes for a layer under `key`."""
         if layer is None:
             return
         if seed_from_layer:
             user_vis[key] = bool(layer.visible)
 
-        def _on_visible_change(event=None, _k=key, _layer=layer):
+        def _on_visible_change(
+            _event: Any = None, _k: str = key, _layer: napari.layers.Layer = layer
+        ) -> None:
             nonlocal vis_prog
             if vis_prog:
                 return
@@ -301,7 +317,7 @@ def draw_objects(
 
         layer.events.visible.connect(_on_visible_change)
 
-    def track(layer, key: str):
+    def track(layer: napari.layers.Layer | None, key: str) -> None:
         """Helper: bind visibility and seed `user_vis` from the layer."""
         bind_user_vis(layer, key, seed_from_layer=True)
 
@@ -338,7 +354,7 @@ def draw_objects(
 
     dz_text = -0.015 * max(1e-9, (zmax - zmin))
 
-    def make_label_cfg():
+    def make_label_cfg() -> dict[str, Any]:
         """Return a text config dict reused for distance label layers."""
         return {
             "string": "{label}",
@@ -451,7 +467,7 @@ def draw_objects(
         )
         track(distance_labels_psds_hc, "__hc_lbl_p__")
 
-    def set_vis(layer, key, has):
+    def set_vis(layer: napari.layers.Layer | None, key: str, has: bool) -> None:
         """Programmatically set layer visibility without clobbering user choice."""
         nonlocal vis_prog
         if layer is not None:
@@ -461,8 +477,7 @@ def draw_objects(
             finally:
                 vis_prog = False
 
-    point_layers: dict[str, Any] = {}
-    for obj in [o for o in df["object"].unique()]:
+    for obj in list(df["object"].unique()):
         mask_obj = df["object"] == obj
         rows: pd.DataFrame = df.loc[mask_obj]
         pts = rows[["pos_z", "pos_y", "pos_x"]].to_numpy(float)
@@ -475,7 +490,14 @@ def draw_objects(
             sizes = base
         colors = colors_for_rows(rows, str(obj))
 
-        _allowed_visible = {cfg.ribbons_obj, cfg.psds_obj, cfg.pillar_obj, cfg.modiolar_obj, "apical", "basal"}
+        _allowed_visible = {
+            cfg.ribbons_obj,
+            cfg.psds_obj,
+            cfg.pillar_obj,
+            cfg.modiolar_obj,
+            "apical",
+            "basal",
+        }
         _initial_visible = obj in _allowed_visible
 
         layer = viewer.add_points(
@@ -508,7 +530,12 @@ def draw_objects(
     max_range = float(max(zmax - zmin, ymax - ymin, xmax - xmin))
     d_eps = 1e-6 * max_range if np.isfinite(max_range) and max_range > 0 else 1e-6
 
-    def build_distance_for(obj_name: str, sel_labels, dist_col: str, normal_getter):
+    def build_distance_for(
+        obj_name: str,
+        sel_labels: list[str],
+        dist_col: str,
+        normal_getter: Callable[[str], tuple[np.ndarray, np.ndarray] | None],
+    ) -> tuple[np.ndarray, np.ndarray, list[str]]:
         """Build vectors and midpoints for distances along a plane normal."""
         mask = (df["object"] == obj_name) & (df["ihc_label"].astype(str).isin(sel_labels))
         rows = df.loc[mask]
@@ -551,11 +578,11 @@ def draw_objects(
     point_layers_order = list(point_layers.items())
     batching = False
 
-    def selected_labels_now():
+    def selected_labels_now() -> list[str]:
         """Return current set of selected IHC labels in the dock."""
         return [lab for lab, cb in checks.items() if cb.value]
 
-    def update_view(selected):
+    def update_view(selected: list[str]) -> None:
         """Rebuild layers according to the selected labels."""
         nonlocal vis_prog
 
@@ -572,11 +599,13 @@ def draw_objects(
             vec_r_hc, mid_r_hc, txt_r_hc = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
             vec_p_hc, mid_p_hc, txt_p_hc = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
         else:
-            labeled = df.loc[~unlabeled_mask & df["ihc_label"].astype(str).str.strip().isin(selected)]
+            labeled = df.loc[
+                ~unlabeled_mask & df["ihc_label"].astype(str).str.strip().isin(selected)
+            ]
             df_points = pd.concat([labeled, df.loc[unlabeled_mask]], ignore_index=True)
 
-            idxs_pm = [pm_label_to_idx[l] for l in selected if l in pm_label_to_idx]
-            idxs_hc = [hc_label_to_idx[l] for l in selected if l in hc_label_to_idx]
+            idxs_pm = [pm_label_to_idx[label] for label in selected if label in pm_label_to_idx]
+            idxs_hc = [hc_label_to_idx[label] for label in selected if label in hc_label_to_idx]
 
             if idxs_pm:
                 update_shapes(pm_layer, [pm_planes[i] for i in idxs_pm])
@@ -598,7 +627,9 @@ def draw_objects(
                 else (EMPTY_VEC, EMPTY_PTS, EMPTY_TXT)
             )
             vec_r_hc, mid_r_hc, txt_r_hc = (
-                build_distance_for(ribbons, selected, "habenular_cuticular_axis", hc_normal_for_label)
+                build_distance_for(
+                    ribbons, selected, "habenular_cuticular_axis", hc_normal_for_label
+                )
                 if show_rib
                 else (EMPTY_VEC, EMPTY_PTS, EMPTY_TXT)
             )
@@ -664,7 +695,7 @@ def draw_objects(
         update_label_points(distance_labels_ribbons_hc, mid_r_hc, txt_r_hc)
         update_label_points(distance_labels_psds_hc, mid_p_hc, txt_p_hc)
 
-    def apply():
+    def apply() -> None:
         """Apply current toggles if not in a batch operation."""
         if not batching:
             update_view([lab for lab, cb in checks.items() if cb.value])
@@ -678,7 +709,7 @@ def draw_objects(
         cb_pil_psd.changed.connect(apply)
         cb_mod_psd.changed.connect(apply)
 
-    def set_all(val: bool):
+    def set_all(val: bool) -> None:
         """Set all label checkboxes to the same value and refresh."""
         nonlocal batching
         batching = True

@@ -5,11 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from pmc_app.models import FinderConfig
+
 F = np.float64
 EPS: float = float(np.finfo(np.float64).eps)
 
 
-def identify_poles(df: pd.DataFrame, cfg) -> pd.DataFrame:
+def identify_poles(df: pd.DataFrame, cfg: FinderConfig) -> pd.DataFrame | None:
     """Relabel apical/basal anchors per IHC using proximity to synapses.
 
     For each IHC label with both anchors present, the anchor that is closer to
@@ -58,7 +60,7 @@ def identify_poles(df: pd.DataFrame, cfg) -> pd.DataFrame:
     return out
 
 
-def build_pm_planes(df: pd.DataFrame, cfg) -> tuple[list[np.ndarray], list[str]]:
+def build_pm_planes(df: pd.DataFrame, cfg: FinderConfig) -> tuple[list[np.ndarray], list[str]]:
     """Build pillar–modiolar (PM) rectangles per IHC in ZYX order.
 
     The lateral extent is derived from synapse spread perpendicular to the
@@ -133,7 +135,7 @@ def build_pm_planes(df: pd.DataFrame, cfg) -> tuple[list[np.ndarray], list[str]]
     return polys, labels
 
 
-def build_hc_planes(df: pd.DataFrame, cfg) -> tuple[list[np.ndarray], list[str]]:
+def build_hc_planes(df: pd.DataFrame, cfg: FinderConfig) -> tuple[list[np.ndarray], list[str]]:
     """Build habenular–cuticular (HC) rectangles per IHC in ZYX order.
 
     For each IHC, derive the lateral axis as in the PM plane and the thickness
@@ -216,10 +218,10 @@ def build_hc_planes(df: pd.DataFrame, cfg) -> tuple[list[np.ndarray], list[str]]
 
 def classify_synapses(
     df: pd.DataFrame,
-    cfg,
+    cfg: FinderConfig,
     planes: tuple[list[np.ndarray], list[str]] | None = None,
     hc_planes: tuple[list[np.ndarray], list[str]] | None = None,
-) -> pd.DataFrame:
+) -> pd.DataFrame | None:
     """Classify synapses and compute distances along PM and HC axes.
 
     Adds:
@@ -247,8 +249,12 @@ def classify_synapses(
 
     pil_row = out[out["object"] == cfg.pillar_obj].iloc[0]
     mod_row = out[out["object"] == cfg.modiolar_obj].iloc[0]
-    P_pil = np.array([[float(pil_row["pos_z"]), float(pil_row["pos_y"]), float(pil_row["pos_x"])]], dtype=F)
-    P_mod = np.array([[float(mod_row["pos_z"]), float(mod_row["pos_y"]), float(mod_row["pos_x"])]], dtype=F)
+    P_pil = np.array(
+        [[float(pil_row["pos_z"]), float(pil_row["pos_y"]), float(pil_row["pos_x"])]], dtype=F
+    )
+    P_mod = np.array(
+        [[float(mod_row["pos_z"]), float(mod_row["pos_y"]), float(mod_row["pos_x"])]], dtype=F
+    )
 
     pm_map: dict[str, np.ndarray] = {}
     if planes is not None:
@@ -268,7 +274,11 @@ def classify_synapses(
     per_label: dict[str, dict] = {}
     pillar_side_counts = {0: 0, 1: 0}
 
-    def geometry_from_label(ap_row, ba_row, group_xy):
+    def geometry_from_label(
+        ap_row: pd.Series,
+        ba_row: pd.Series,
+        group_xy: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
         """Return geometry primitives for a single IHC."""
         x1, y1, z1 = float(ap_row["pos_x"]), float(ap_row["pos_y"]), float(ap_row["pos_z"])
         x2, y2, z2 = float(ba_row["pos_x"]), float(ba_row["pos_y"]), float(ba_row["pos_z"])
@@ -296,12 +306,21 @@ def classify_synapses(
         a0 = np.array([z1, y1, x1], dtype=F)
         return a0, U, v_hat, n_hat, vmin, vmax
 
-    def side_sign(P_zyx, A, n_hat):
+    def side_sign(
+        P_zyx: np.ndarray,
+        A: np.ndarray,
+        n_hat: np.ndarray,
+    ) -> np.ndarray:
         """Return pillar/modiolar side as 0/1 relative to a PM plane."""
         s = (P_zyx - A) @ n_hat
         return (s >= 0.0).astype(int)
 
-    def point_to_rect_distance(P, A, U, V):
+    def point_to_rect_distance(
+        P: np.ndarray,
+        A: np.ndarray,
+        U: np.ndarray,
+        V: np.ndarray,
+    ) -> float:
         """Return minimum distance from point to rectangle spanned by U, V."""
         q = P - A
         u2 = float(U @ U)
@@ -432,7 +451,7 @@ def classify_synapses(
             out.loc[idx, "pillar_modiolar_axis"] = d * sign_pm
 
     # HC signed distance: negative below the HC plane (toward -N), positive above
-    for lab_key, pack in per_label.items():
+    for _lab_key, pack in per_label.items():
         idx = out.index[pack["mask_syn"]]
         if not len(idx):
             continue

@@ -52,18 +52,16 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "C4", "SIM", "ARG"]
 ignore = ["E203", "E501"]
 
-[tool.ruff.exclude]
-patterns = ["pmc_app/resources/*"]
 
 [tool.mypy]
 python_version = "3.12"
-packages = ["pmc_app"]
 disallow_untyped_defs = true
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true
 no_implicit_optional = true
+
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,44 +1,45 @@
-import pandas as pd
-import pytest
+from __future__ import annotations
+
 from pathlib import Path
 
-from pmc_app.models import FinderConfig, Group
+import pandas as pd
+import pytest
+
 from pmc_app import parser as parser_mod
-from pmc_app.processing import process_position_df, process_volume_df, merge_dfs
+from pmc_app.models import FinderConfig, Group
+from pmc_app.processing import merge_dfs, process_position_df, process_volume_df
 
 
-def _vol_sheet():
-    # Mimic parser._read_excel_safe() output: headers already normalized.
-    # Two rows -> one labeled to Set 1, one to Set 2
+def _build_volume_df() -> pd.DataFrame:
+    """Minimal Volume sheet with two objects labeled across Set 1/2."""
     return pd.DataFrame(
-        {
-            "ID": [1, 2],
-            "Volume": [10.0, 20.0],
-            "Set 1": ["x", ""],
-            "Set 2": ["", "x"],
-        }
+        {"ID": [1, 2], "Volume": [10.0, 20.0], "Set 1": ["x", ""], "Set 2": ["", "x"]}
     )
 
 
-def _pos_sheet():
-    # Minimal positions: three synapse points for IHC-1 (IDs 1..3)
-    # plus pillar/modiolar anchors.
+def _build_position_df() -> pd.DataFrame:
+    """Minimal Position sheet with synapses (Spots 1) and anchors."""
     return pd.DataFrame(
         {
             "Position X": [0, 1, 2, 0, 0, 0, 0],
             "Position Y": [0, 0, 0, -1, 1, 0, 0],
             "Position Z": [0, 0, 0, 0, 0, 0, 1],
             "ID": [1, 2, 3, 100, 101, 1, 3],
-            # 'Spots 1' for synapses so ihc_label can be derived;
-            # pillar/modiolar use their object names.
-            "Surpass Object": ["ribbons", "PSDs", "PSDs", "pillar",
-                               "modiolar", "Spots 1", "Spots 1"],
+            "Surpass Object": [
+                "ribbons",
+                "PSDs",
+                "PSDs",
+                "pillar",
+                "modiolar",
+                "Spots 1",
+                "Spots 1",
+            ],
         }
     )
 
 
 @pytest.fixture
-def cfg(tmp_path):
+def cfg(tmp_path: Path) -> FinderConfig:
     return FinderConfig(
         folder=tmp_path,
         ribbons="rib",
@@ -52,51 +53,47 @@ def cfg(tmp_path):
     )
 
 
+def test_parse_and_process_monkeypatched(
+    monkeypatch: pytest.MonkeyPatch, cfg: FinderConfig
+) -> None:
+    """Parse uses the patched reader; processing derives labels and merges correctly."""
 
-def test_parse_and_process_monkeypatched(monkeypatch, cfg, tmp_path):
-    # Patch the safe excel reader to return our synthetic sheets.
-    def fake_read_excel_safe(path, sheet: str):
+    def fake_read_excel_safe(_path: Path, sheet: str) -> pd.DataFrame:
         if sheet == "Volume":
-            return _vol_sheet()
+            return _build_volume_df()
         if sheet == "Position":
-            return _pos_sheet()
-        raise AssertionError("unexpected sheet")
+            return _build_position_df()
+        raise AssertionError(f"unexpected sheet: {sheet!r}")
 
     monkeypatch.setattr(parser_mod, "_read_excel_safe", fake_read_excel_safe)
 
-    # Provide both role and token keys so the test works with either implementation.
-    g = Group(
+    group = Group(
         id="G1",
         file_paths={
             "ribbons": Path("G1rib.xlsx"),
             "psds": Path("G1psd.xlsx"),
             "positions": Path("G1pos.xlsx"),
-            # token aliases too, if you keep them:
             cfg.ribbons: Path("G1rib.xlsx"),
             cfg.psds: Path("G1psd.xlsx"),
             cfg.positions: Path("G1pos.xlsx"),
         },
     )
 
-    ribbons_df, psds_df, positions_df = parser_mod.parse_group(g, cfg)
+    rib_raw, psd_raw, pos_raw = parser_mod.parse_group(group, cfg)
 
-    # Process volume sheets down to compact schema (adds ihc_label from Set N)
-    rib_p = process_volume_df(ribbons_df)
-    psd_p = process_volume_df(psds_df)
+    rib = process_volume_df(rib_raw)
+    psd = process_volume_df(psd_raw)
+    assert set(rib.columns) == {"id", "ihc_label", "object", "object_id", "volume"}
+    assert set(psd.columns) == set(rib.columns)
+    assert set(rib["ihc_label"].astype(str)) == {"1", "2"}
 
-    assert set(rib_p.columns) == {"id", "ihc_label", "object", "object_id", "volume"}
-    assert set(psd_p.columns) == set(rib_p.columns)
-    # Expect two rows with ihc_label extracted as "1" and "2"
-    assert set(rib_p["ihc_label"].astype(str)) == {"1", "2"}
+    pos = process_position_df(pos_raw)
+    ap = pos[pos["object"] == "apical"]
+    ba = pos[pos["object"] == "basal"]
+    assert len(ap) == 1 and ap.iloc[0]["object_id"] == 1
+    assert len(ba) == 1 and ba.iloc[0]["object_id"] == 3
 
-    pos_p = process_position_df(positions_df, cfg)
-    # apical/basal tags should be assigned to min/max object_id within Spots 1
-    ap_rows = pos_p[pos_p["object"] == "apical"]
-    ba_rows = pos_p[pos_p["object"] == "basal"]
-    assert len(ap_rows) == 1 and ap_rows.iloc[0]["object_id"] == 1
-    assert len(ba_rows) == 1 and ba_rows.iloc[0]["object_id"] == 3
-
-    # Merge keeps synapses and positions together; unassigned synapses get "Unclassified ..."
-    merged = merge_dfs(rib_p, psd_p, pos_p, cfg)
-    assert {"pillar", "modiolar"}.issubset(set(merged["object"]))
-    assert "Unclassified ribbons" in set(merged["object"]) or "Unclassified PSDs" in set(merged["object"])
+    merged = merge_dfs(rib, psd, pos, cfg)
+    objs = set(merged["object"])
+    assert {"pillar", "modiolar"} <= objs
+    assert ("Unclassified ribbons" in objs) or ("Unclassified PSDs" in objs)

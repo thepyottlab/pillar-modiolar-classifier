@@ -49,7 +49,7 @@ A small **Napari-based** desktop app to help analyze inner hair cell (IHC) synap
 
    * Ribbon volumes
    * PSD volumes
-   * Spot/Surface positions 
+   * Spot/Surface positions
 4. Use **Ribbons only** or **PSDs only** if you want to restrict processing.
 5. Click **Load files**. Detected IDs appear under **Loaded IDs**.
 6. Set the **Object names** to match your Imaris labels (IHC, pillar, modiolar, ribbons, PSDs), confirm object names with enter or use 'Update all fields'.

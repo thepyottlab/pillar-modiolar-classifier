@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict
 
 from .exceptions import GroupValidationError
 from .models import FinderConfig, Group
 
 
-def find_groups(cfg: FinderConfig) -> Dict[str, Group]:
+def find_groups(cfg: FinderConfig) -> dict[str, Group]:
     """Return only groups that contain all required files; raise if any were skipped.
 
     Matching is done by filename stem ending with the configured *suffix tokens*
@@ -64,7 +63,7 @@ def find_groups(cfg: FinderConfig) -> Dict[str, Group]:
                 temp[gid][role] = p
                 break
 
-    complete: Dict[str, Group] = {}
+    complete: dict[str, Group] = {}
     problems: list[str] = []
 
     for gid, roles in sorted(temp.items()):

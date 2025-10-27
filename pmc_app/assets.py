@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from importlib.resources import files
 from pathlib import Path
-from typing import Optional
 
 
 def resource_path(name: str, *, package: str = "pmc_app.resources") -> str:
@@ -20,7 +19,7 @@ def resource_path(name: str, *, package: str = "pmc_app.resources") -> str:
     Returns:
         str: A concrete path on disk to the resource.
     """
-    meipass: Optional[str] = getattr(sys, "_MEIPASS", None)
+    meipass: str | None = getattr(sys, "_MEIPASS", None)
     if meipass:
         candidate = Path(meipass, package.replace(".", "/"), name)
         if candidate.exists():
@@ -29,6 +28,7 @@ def resource_path(name: str, *, package: str = "pmc_app.resources") -> str:
     resource = files(package) / name
     try:
         from importlib.resources import as_file
+
         with as_file(resource) as tmp:
             return str(tmp)
     except Exception:

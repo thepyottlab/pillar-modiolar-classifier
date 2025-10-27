@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from pathlib import Path
 
 import pandas as pd
 
@@ -17,7 +17,7 @@ def _empty_volume_df() -> pd.DataFrame:
     return pd.DataFrame(columns=_EMPTY_VOL_COLS)
 
 
-def _read_excel_safe(path, sheet: str) -> pd.DataFrame:
+def _read_excel_safe(path: Path, sheet: str) -> pd.DataFrame:
     """Read an Excel sheet and normalize the header row placement.
 
     Promotes the first row to the header to preserve legacy behavior.
@@ -46,7 +46,7 @@ def _read_excel_safe(path, sheet: str) -> pd.DataFrame:
     return df
 
 
-def parse_group(group: Group, cfg: FinderConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def parse_group(group: Group, cfg: FinderConfig) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Read ribbons, PSDs, and positions for a single group.
 
     Note:
@@ -72,7 +72,7 @@ def parse_group(group: Group, cfg: FinderConfig) -> Tuple[pd.DataFrame, pd.DataF
     positions_df["id"] = group.id
     positions_df["source_file"] = pos_path.name
 
-    ribbons_df: Optional[pd.DataFrame]
+    ribbons_df: pd.DataFrame | None
     if cfg.mode in (InputMode.BOTH, InputMode.RIBBONS_ONLY):
         rib_path = group.file_paths.get("ribbons")
         if rib_path is not None:
@@ -85,7 +85,7 @@ def parse_group(group: Group, cfg: FinderConfig) -> Tuple[pd.DataFrame, pd.DataF
     else:
         ribbons_df = _empty_volume_df()
 
-    psds_df: Optional[pd.DataFrame]
+    psds_df: pd.DataFrame | None
     if cfg.mode in (InputMode.BOTH, InputMode.PSDS_ONLY):
         psd_path = group.file_paths.get("psds")
         if psd_path is not None:
