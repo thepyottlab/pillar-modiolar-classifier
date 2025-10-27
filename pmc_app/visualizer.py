@@ -140,8 +140,9 @@ def draw_objects(
         [
             s
             for s in df["ihc_label"].dropna().astype(str).str.strip().unique()
-            if s.lower() not in {"nan", "none", ""}
-        ]
+            if s.lower() != "nan"
+        ],
+        key=lambda x: int(x)
     )
 
     max_vol_ribbon = df.loc[df["object"] == ribbons, "volume"].astype(float).max()
