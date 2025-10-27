@@ -142,7 +142,7 @@ def draw_objects(
             for s in df["ihc_label"].dropna().astype(str).str.strip().unique()
             if s.lower() != "nan"
         ],
-        key=lambda x: int(x)
+        key=lambda x: int(x),
     )
 
     max_vol_ribbon = df.loc[df["object"] == ribbons, "volume"].astype(float).max()
@@ -275,7 +275,7 @@ def draw_objects(
             except Exception:
                 pass
             layer.data = pos3
-            layer.text.string = {'array':lab}
+            layer.text.string = {"array": lab}
             try:
                 layer.text.visible = prev_vis
             except Exception:
@@ -286,10 +286,12 @@ def draw_objects(
     user_vis: dict[str, bool] = {}
     vis_prog = False
 
-    def bind_user_vis(layer, key: str):
+    def bind_user_vis(layer, key: str, seed_from_layer: bool = True):
         """Track user-driven visibility changes for a layer under `key`."""
         if layer is None:
             return
+        if seed_from_layer:
+            user_vis[key] = bool(layer.visible)
 
         def _on_visible_change(event=None, _k=key, _layer=layer):
             nonlocal vis_prog
@@ -298,6 +300,10 @@ def draw_objects(
             user_vis[_k] = bool(_layer.visible)
 
         layer.events.visible.connect(_on_visible_change)
+
+    def track(layer, key: str):
+        """Helper: bind visibility and seed `user_vis` from the layer."""
+        bind_user_vis(layer, key, seed_from_layer=True)
 
     pm_layer = viewer.add_shapes(
         pm_planes,
@@ -310,8 +316,7 @@ def draw_objects(
         name="Habenular-cuticular axes",
         visible=True,
     )
-    bind_user_vis(pm_layer, "__pm_planes__")
-    user_vis["__pm_planes__"] = True
+    track(pm_layer, "__pm_planes__")
 
     hc_layer = viewer.add_shapes(
         hc_planes,
@@ -324,8 +329,7 @@ def draw_objects(
         name="Pillar-modiolar axes",
         visible=True,
     )
-    bind_user_vis(hc_layer, "__hc_planes__")
-    user_vis["__hc_planes__"] = True
+    track(hc_layer, "__hc_planes__")
 
     distance_paths_ribbons_pm = distance_labels_ribbons_pm = None
     distance_paths_psds_pm = distance_labels_psds_pm = None
@@ -356,6 +360,8 @@ def draw_objects(
             blending="translucent_no_depth",
             visible=False,
         )
+        track(distance_paths_ribbons_pm, "__pm_vec_r__")
+
         distance_labels_ribbons_pm = viewer.add_points(
             np.zeros((0, 3), float),
             name="PM distance labels (ribbons)",
@@ -367,6 +373,8 @@ def draw_objects(
             features=pd.DataFrame({"label": []}),
             text=make_label_cfg(),
         )
+        track(distance_labels_ribbons_pm, "__pm_lbl_r__")
+
         distance_paths_ribbons_hc = viewer.add_vectors(
             np.zeros((0, 2, 3), float),
             name="HC distance vectors (ribbons)",
@@ -377,6 +385,8 @@ def draw_objects(
             blending="translucent_no_depth",
             visible=False,
         )
+        track(distance_paths_ribbons_hc, "__hc_vec_r__")
+
         distance_labels_ribbons_hc = viewer.add_points(
             np.zeros((0, 3), float),
             name="HC distance labels (ribbons)",
@@ -388,6 +398,7 @@ def draw_objects(
             features=pd.DataFrame({"label": []}),
             text=make_label_cfg(),
         )
+        track(distance_labels_ribbons_hc, "__hc_lbl_r__")
 
     if show_psd:
         distance_paths_psds_pm = viewer.add_vectors(
@@ -400,6 +411,8 @@ def draw_objects(
             blending="translucent_no_depth",
             visible=False,
         )
+        track(distance_paths_psds_pm, "__pm_vec_p__")
+
         distance_labels_psds_pm = viewer.add_points(
             np.zeros((0, 3), float),
             name="PM distance labels (PSDs)",
@@ -411,6 +424,8 @@ def draw_objects(
             features=pd.DataFrame({"label": []}),
             text=make_label_cfg(),
         )
+        track(distance_labels_psds_pm, "__pm_lbl_p__")
+
         distance_paths_psds_hc = viewer.add_vectors(
             np.zeros((0, 2, 3), float),
             name="HC distance vectors (PSDs)",
@@ -421,6 +436,8 @@ def draw_objects(
             blending="translucent_no_depth",
             visible=False,
         )
+        track(distance_paths_psds_hc, "__hc_vec_p__")
+
         distance_labels_psds_hc = viewer.add_points(
             np.zeros((0, 3), float),
             name="HC distance labels (PSDs)",
@@ -432,32 +449,19 @@ def draw_objects(
             features=pd.DataFrame({"label": []}),
             text=make_label_cfg(),
         )
+        track(distance_labels_psds_hc, "__hc_lbl_p__")
 
-    for key in [
-        "__pm_vec_r__",
-        "__pm_lbl_r__",
-        "__pm_vec_p__",
-        "__pm_lbl_p__",
-        "__hc_vec_r__",
-        "__hc_lbl_r__",
-        "__hc_vec_p__",
-        "__hc_lbl_p__",
-    ]:
-        user_vis[key] = False
+    def set_vis(layer, key, has):
+        """Programmatically set layer visibility without clobbering user choice."""
+        nonlocal vis_prog
+        if layer is not None:
+            vis_prog = True
+            try:
+                layer.visible = bool(user_vis.get(key, False) and has)
+            finally:
+                vis_prog = False
 
-    def bind_all_vis():
-        """Bind visibility trackers for all dynamic layers."""
-        bind_user_vis(distance_paths_ribbons_pm, "__pm_vec_r__")
-        bind_user_vis(distance_labels_ribbons_pm, "__pm_lbl_r__")
-        bind_user_vis(distance_paths_psds_pm, "__pm_vec_p__")
-        bind_user_vis(distance_labels_psds_pm, "__pm_lbl_p__")
-        bind_user_vis(distance_paths_ribbons_hc, "__hc_vec_r__")
-        bind_user_vis(distance_labels_ribbons_hc, "__hc_lbl_r__")
-        bind_user_vis(distance_paths_psds_hc, "__hc_vec_p__")
-        bind_user_vis(distance_labels_psds_hc, "__hc_lbl_p__")
-
-    bind_all_vis()
-
+    point_layers: dict[str, Any] = {}
     for obj in [o for o in df["object"].unique()]:
         mask_obj = df["object"] == obj
         rows: pd.DataFrame = df.loc[mask_obj]
@@ -485,8 +489,7 @@ def draw_objects(
         )
         layer.metadata["object"] = obj
         point_layers[str(obj)] = layer
-        user_vis[str(obj)] = _initial_visible
-        bind_user_vis(layer, str(obj))
+        track(layer, str(obj))
 
     checks = {lab: CheckBox(text=lab, value=True) for lab in labels}
     btn_all_on, btn_all_off = PushButton(text="Show all"), PushButton(text="Hide all")
@@ -577,8 +580,12 @@ def draw_objects(
 
             if idxs_pm:
                 update_shapes(pm_layer, [pm_planes[i] for i in idxs_pm])
+            else:
+                update_shapes(pm_layer, [])
             if idxs_hc:
                 update_shapes(hc_layer, [hc_planes[i] for i in idxs_hc])
+            else:
+                update_shapes(hc_layer, [])
 
             vec_r_pm, mid_r_pm, txt_r_pm = (
                 build_distance_for(ribbons, selected, "pillar_modiolar_axis", pm_normal_for_label)
@@ -602,9 +609,11 @@ def draw_objects(
             )
 
         vis_prog = True
-        pm_layer.visible = bool(user_vis.get("__pm_planes__", True) and bool(idxs_pm))
-        hc_layer.visible = bool(user_vis.get("__hc_planes__", True) and bool(idxs_hc))
-        vis_prog = False
+        try:
+            pm_layer.visible = bool(user_vis.get("__pm_planes__", True) and bool(idxs_pm))
+            hc_layer.visible = bool(user_vis.get("__hc_planes__", True) and bool(idxs_hc))
+        finally:
+            vis_prog = False
 
         for obj, layer in point_layers_order:
             mask_sel = df_points["object"] == obj
@@ -631,12 +640,10 @@ def draw_objects(
                         colors = solid(n, COL_DEFAULT)
                 update_points(layer, pts, sizes, colors)
             vis_prog = True
-            layer.visible = bool(user_vis.get(str(obj), True) and (n > 0))
-            vis_prog = False
-
-        def set_vis(layer, key, has):
-            if layer is not None:
-                layer.visible = bool(user_vis.get(key, False) and has)
+            try:
+                layer.visible = bool(user_vis.get(str(obj), True) and (n > 0))
+            finally:
+                vis_prog = False
 
         set_vis(distance_paths_ribbons_pm, "__pm_vec_r__", len(vec_r_pm) > 0)
         set_vis(distance_labels_ribbons_pm, "__pm_lbl_r__", len(vec_r_pm) > 0)
