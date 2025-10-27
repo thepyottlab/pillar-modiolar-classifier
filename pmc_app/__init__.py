@@ -1,8 +1,16 @@
-"""Public package entry points and metadata for the Pillar–Modiolar Classifier app."""
+"""Public package entry points and metadata for the Pillar–Modiolar Classifier."""
 
 from __future__ import annotations
 
-__all__ = ["launch_gui"]
+from importlib import import_module
+
+__all__ = ["launch_gui", "__version__"]
 __version__ = "1.4.0"
 
-from .gui import launch_gui  # noqa: E402
+
+def launch_gui() -> None:
+    """Launch the GUI application.
+
+    Imported lazily to avoid importing Qt/Napari at package import time.
+    """
+    return import_module(".gui", __package__).launch_gui()

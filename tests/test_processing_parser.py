@@ -1,5 +1,6 @@
 import pandas as pd
 import pytest
+from pathlib import Path
 
 from pmc_app.models import FinderConfig, Group
 from pmc_app import parser as parser_mod
@@ -24,21 +25,22 @@ def _pos_sheet():
     # plus pillar/modiolar anchors.
     return pd.DataFrame(
         {
-            "Position X": [0, 1, 2, 0, 0],
-            "Position Y": [0, 0, 0, -1, 1],
-            "Position Z": [0, 0, 0, 0, 0],
-            "ID": [1, 2, 3, 100, 101],
+            "Position X": [0, 1, 2, 0, 0, 0, 0],
+            "Position Y": [0, 0, 0, -1, 1, 0, 0],
+            "Position Z": [0, 0, 0, 0, 0, 0, 1],
+            "ID": [1, 2, 3, 100, 101, 1, 3],
             # 'Spots 1' for synapses so ihc_label can be derived;
             # pillar/modiolar use their object names.
-            "Surpass Object": ["Spots 1", "Spots 1", "Spots 1", "pillar", "modiolar"],
+            "Surpass Object": ["ribbons", "PSDs", "PSDs", "pillar",
+                               "modiolar", "Spots 1", "Spots 1"],
         }
     )
 
 
 @pytest.fixture
-def cfg():
+def cfg(tmp_path):
     return FinderConfig(
-        folder=pytest.ensuretemp("unused"),
+        folder=tmp_path,
         ribbons="rib",
         psds="psd",
         positions="pos",
@@ -50,7 +52,8 @@ def cfg():
     )
 
 
-def test_parse_and_process_monkeypatched(monkeypatch, cfg):
+
+def test_parse_and_process_monkeypatched(monkeypatch, cfg, tmp_path):
     # Patch the safe excel reader to return our synthetic sheets.
     def fake_read_excel_safe(path, sheet: str):
         if sheet == "Volume":
@@ -65,13 +68,13 @@ def test_parse_and_process_monkeypatched(monkeypatch, cfg):
     g = Group(
         id="G1",
         file_paths={
-            "ribbons": "G1rib.xlsx",
-            "psds": "G1psd.xlsx",
-            "positions": "G1pos.xlsx",
-            # token aliases (in case parse_group looks up by tokens)
-            cfg.ribbons: "G1rib.xlsx",
-            cfg.psds: "G1psd.xlsx",
-            cfg.positions: "G1pos.xlsx",
+            "ribbons": Path("G1rib.xlsx"),
+            "psds": Path("G1psd.xlsx"),
+            "positions": Path("G1pos.xlsx"),
+            # token aliases too, if you keep them:
+            cfg.ribbons: Path("G1rib.xlsx"),
+            cfg.psds: Path("G1psd.xlsx"),
+            cfg.positions: Path("G1pos.xlsx"),
         },
     )
 
