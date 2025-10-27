@@ -1,5 +1,4 @@
-"""Public package entry points and metadata for the Pillar-Modiolar Classifier
-app."""
+"""Public package entry points and metadata for the Pillar–Modiolar Classifier app."""
 
 from __future__ import annotations
 

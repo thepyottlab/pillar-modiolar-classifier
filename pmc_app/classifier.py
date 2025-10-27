@@ -1,4 +1,4 @@
-"""Geometry building and per-synapse classification (PM/HC coordinates)."""
+"""Plane building and per-synapse pillar-modiolar classification."""
 
 from __future__ import annotations
 
@@ -15,6 +15,13 @@ def identify_poles(df: pd.DataFrame, cfg) -> pd.DataFrame:
     For each IHC label with both anchors present, the anchor that is closer to
     the majority of synapses (ribbons and PSDs) is relabeled as basal; the other
     becomes apical.
+
+    Args:
+        df: Unified table with objects and positions.
+        cfg: Configuration (used for object names).
+
+    Returns:
+        pd.DataFrame: Copy with 'apical'/'basal' possibly swapped per IHC.
     """
     out = df.copy()
     ribbons = cfg.ribbons_obj
@@ -55,7 +62,15 @@ def build_pm_planes(df: pd.DataFrame, cfg) -> tuple[list[np.ndarray], list[str]]
     """Build pillar–modiolar (PM) rectangles per IHC in ZYX order.
 
     The lateral extent is derived from synapse spread perpendicular to the
-    apical→basal direction. Each label is copied from the basal row used.
+    apical-basal/cuticular-habenular direction. Each label is copied from the
+    basal row used.
+
+    Args:
+        df: Unified table.
+        cfg: Configuration (for object names).
+
+    Returns:
+        tuple[list[np.ndarray], list[str]]: Rectangles and their IHC labels.
     """
     ribbons, psds = cfg.ribbons_obj, cfg.psds_obj
     eps = 1e-9
@@ -72,10 +87,12 @@ def build_pm_planes(df: pd.DataFrame, cfg) -> tuple[list[np.ndarray], list[str]]
         x1, y1, z1 = float(ap["pos_x"]), float(ap["pos_y"]), float(ap["pos_z"])
         x2, y2, z2 = float(ba["pos_x"]), float(ba["pos_y"]), float(ba["pos_z"])
 
+        # U: apical-basal direction (in ZYX space)
         U_vec = np.array([z2 - z1, y2 - y1, x2 - x1], float)
         U_len = float(np.linalg.norm(U_vec))
         U_hat = U_vec / (U_len if U_len > eps else 1.0)
 
+        # v_hat: lateral (perp. in XY), used to span rectangle width
         vx, vy = (x2 - x1), (y2 - y1)
         norm_xy = (vx * vx + vy * vy) ** 0.5
         px, py = (-vy / max(norm_xy, eps), vx / max(norm_xy, eps))
@@ -116,12 +133,18 @@ def build_pm_planes(df: pd.DataFrame, cfg) -> tuple[list[np.ndarray], list[str]]
     return polys, labels
 
 
-
 def build_hc_planes(df: pd.DataFrame, cfg) -> tuple[list[np.ndarray], list[str]]:
     """Build habenular–cuticular (HC) rectangles per IHC in ZYX order.
 
     For each IHC, derive the lateral axis as in the PM plane and the thickness
     axis as the PM plane normal. Rectangles are anchored at the basal side.
+
+    Args:
+        df: Unified table.
+        cfg: Configuration.
+
+    Returns:
+        tuple[list[np.ndarray], list[str]]: Rectangles and their IHC labels.
     """
     ribbons, psds = cfg.ribbons_obj, cfg.psds_obj
 
@@ -143,6 +166,7 @@ def build_hc_planes(df: pd.DataFrame, cfg) -> tuple[list[np.ndarray], list[str]]
         px, py = (-vy / max(norm_xy, EPS), vx / max(norm_xy, EPS))
         v_hat = np.array([0.0, py, px], dtype=F)
 
+        # N (HC normal) = U × v_hat — points "through" the HC thickness
         n_hat = np.cross(U, v_hat).astype(F, copy=False)
         n_hat = n_hat / (float(np.linalg.norm(n_hat)) + EPS)
 
@@ -161,7 +185,7 @@ def build_hc_planes(df: pd.DataFrame, cfg) -> tuple[list[np.ndarray], list[str]]
 
         v_mid = 0.5 * (vmin + vmax)
         a0 = np.array([z1, y1, x1], dtype=F)
-        center = a0 + U + v_hat * v_mid
+        center = a0 + U + v_hat * v_mid  # noqa: F841
 
         if len(gpos):
             dotsW = (gpos - center) @ n_hat
@@ -177,6 +201,7 @@ def build_hc_planes(df: pd.DataFrame, cfg) -> tuple[list[np.ndarray], list[str]]
 
         W = n_hat * (wmax - wmin)
 
+        # anchor at basal edge, low side of W
         anchor = a0 + U + v_hat * vmin + n_hat * wmin
         c1 = anchor + V + W
         c2 = anchor + W
@@ -204,9 +229,17 @@ def classify_synapses(
 
     The PM/HC geometries are derived per IHC from apical/basal anchors and the
     local synapse spread. For finite rectangles, distances clamp to edges/corners.
+
+    Args:
+        df: Unified table.
+        cfg: Configuration with object names.
+        planes: Optional precomputed PM rectangles and labels.
+        hc_planes: Optional precomputed HC rectangles and labels.
+
+    Returns:
+        pd.DataFrame: Copy with classification columns added.
     """
     out = df.copy()
-
     out["localization"] = pd.Series(pd.NA, dtype="string")
 
     ribbons = cfg.ribbons_obj
@@ -242,11 +275,13 @@ def classify_synapses(
 
         U = np.array([z2 - z1, y2 - y1, x2 - x1], dtype=F)
 
+        # v_hat: lateral along XY, orthogonal to apical→basal in XY
         vx, vy = (x2 - x1), (y2 - y1)
         norm_xy = (vx * vx + vy * vy) ** 0.5
         px, py = (-vy / max(norm_xy, EPS), vx / max(norm_xy, EPS))
         v_hat = np.array([0.0, py, px], dtype=F)
 
+        # PM plane normal = U × v_hat
         n_hat = np.cross(U, v_hat)
         n_hat = n_hat / (float(np.linalg.norm(n_hat)) + EPS)
 
@@ -279,10 +314,12 @@ def classify_synapses(
         except np.linalg.LinAlgError:
             s_star, t_star = -1.0, -1.0
 
+        # inside rectangle?
         if 0.0 <= s_star <= 1.0 and 0.0 <= t_star <= 1.0:
             cp = A + s_star * U + t_star * V
             return float(np.linalg.norm(P - cp))
 
+        # else clamp to edges
         s0 = min(1.0, max(0.0, float((q @ U) / (u2 + EPS))))
         d0 = np.linalg.norm(P - (A + s0 * U))
         q1 = q - V
@@ -356,6 +393,7 @@ def classify_synapses(
             N_hc = N_hc / (float(np.linalg.norm(N_hc)) + EPS)
             per_label[lab_key].update({"a_hc": A_hc, "V_hc": V_hc, "W_hc": W_hc, "N_hc": N_hc})
 
+    # choose a global side mapping if anchors happen to be colinear
     global_pillar_side = 0 if pillar_side_counts[0] >= pillar_side_counts[1] else 1
     global_modiolar_side = 1 - global_pillar_side
 
@@ -378,6 +416,7 @@ def classify_synapses(
         idx = out.index[pack["mask_syn"]]
         out.loc[idx, "localization"] = pd.Series(loc_str, index=idx)
 
+        # PM signed distance: negative on pillar side, positive on modiolar side
         P = out.loc[idx, ["pos_z", "pos_y", "pos_x"]].to_numpy(dtype=F)
         if len(P):
             A_pm = pack["a_pm"]
@@ -392,6 +431,7 @@ def classify_synapses(
             sign_pm = np.where(is_pillar, -1.0, 1.0)
             out.loc[idx, "pillar_modiolar_axis"] = d * sign_pm
 
+    # HC signed distance: negative below the HC plane (toward -N), positive above
     for lab_key, pack in per_label.items():
         idx = out.index[pack["mask_syn"]]
         if not len(idx):
@@ -411,12 +451,11 @@ def classify_synapses(
             n_hat = pack["n_hat"]
             V_hc = v_hat * (vmax - vmin)
             v_mid = 0.5 * (vmin + vmax)
-            base_center = a0 + U + v_hat * v_mid
+            base_center = a0 + U + v_hat * v_mid  # noqa: F841
             A_hc = a0 + U + v_hat * vmin + n_hat * 0.0
             W_hc = n_hat * 1.0
             N_hc = np.cross(V_hc, W_hc).astype(F, copy=False)
             N_hc = N_hc / (float(np.linalg.norm(N_hc)) + EPS)
-            _ = base_center
 
         gpos = out.loc[idx, ["pos_z", "pos_y", "pos_x"]].to_numpy(dtype=F)
         d_hc = np.empty(len(idx), dtype=F)
@@ -428,5 +467,3 @@ def classify_synapses(
             out.loc[idx, "habenular_cuticular_axis"] = d_hc
 
     return out
-
-

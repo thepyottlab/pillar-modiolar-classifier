@@ -6,20 +6,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict
 
+from .exceptions import GroupValidationError
 from .models import FinderConfig, Group
-
-
-
-class GroupValidationError(Exception):
-    """Raised when one or more groups fail required token checks.
-
-    Attributes:
-        groups: The dict of valid groups that *did* pass validation.
-    """
-
-    def __init__(self, message: str, groups: Dict[str, Group] | None = None) -> None:
-        super().__init__(message)
-        self.groups: Dict[str, Group] = groups or {}
 
 
 def find_groups(cfg: FinderConfig) -> Dict[str, Group]:
@@ -36,6 +24,15 @@ def find_groups(cfg: FinderConfig) -> Dict[str, Group]:
     If one or more groups are missing required files, they are excluded and a
     GroupValidationError is raised with a readable summary *and* the remaining
     valid groups attached to ``exc.groups`` so the caller can still use them.
+
+    Args:
+        cfg: File discovery and naming configuration.
+
+    Returns:
+        Dict[str, Group]: Map of group id to group container.
+
+    Raises:
+        GroupValidationError: When at least one group is missing required files.
     """
     folder = Path(cfg.folder)
     allowed_ext = {str(cfg.extensions).lower()}
@@ -60,13 +57,11 @@ def find_groups(cfg: FinderConfig) -> Dict[str, Group]:
             continue
         stem = p.stem
         stem_cmp = stem.lower() if cfg.case_insensitive else stem
-        matched = False
         for tok, role in scans:
             tok_cmp = tok.lower() if cfg.case_insensitive else tok
             if stem_cmp.endswith(tok_cmp):
                 gid = stem[: -len(tok)]
                 temp[gid][role] = p
-                matched = True
                 break
 
     complete: Dict[str, Group] = {}
@@ -74,13 +69,10 @@ def find_groups(cfg: FinderConfig) -> Dict[str, Group]:
 
     for gid, roles in sorted(temp.items()):
         missing: list[str] = []
-
         if "positions" not in roles:
             missing.append(f"positions (*{pos_tok}{ext_tok})")
-
         if not cfg.ribbons_only and "psds" not in roles:
             missing.append(f"PSDs (*{psd_tok}{ext_tok})")
-
         if not cfg.psds_only and "ribbons" not in roles:
             missing.append(f"ribbons (*{rib_tok}{ext_tok})")
 

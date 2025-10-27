@@ -1,5 +1,6 @@
-"""Typed configuration and lightweight data models for the Pillar-Modiolar
-Classifier app."""
+"""Typed configuration and lightweight data models for the Pillar–Modiolar
+Classifier app.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +12,6 @@ from typing import Dict
 
 class InputMode(Enum):
     """Input mode determining which datasets are required and visible."""
-
     BOTH = auto()
     RIBBONS_ONLY = auto()
     PSDS_ONLY = auto()
@@ -29,7 +29,6 @@ class FinderConfig:
         extensions: File extension to scan (e.g., ".xls").
         ribbons_obj: Object label for ribbon points in the Position table.
         psds_obj: Object label for PSD points in the Position table.
-        ihc_obj: Object label used for IHC points (reserved; not currently required).
         pillar_obj: Object label for the pillar anchor.
         modiolar_obj: Object label for the modiolar anchor.
         case_insensitive: Whether to match filename tokens case-insensitively.
@@ -80,8 +79,7 @@ class Group:
 
     Attributes:
         id: Base identifier (e.g., the shared stem before the suffix token).
-        file_paths: Mapping of token -> path. Tokens are configured suffixes.
+        file_paths: Mapping of role -> path. Roles are "ribbons" | "psds" | "positions".
     """
-
     id: str
     file_paths: Dict[str, Path]

@@ -21,6 +21,16 @@ def _read_excel_safe(path, sheet: str) -> pd.DataFrame:
     """Read an Excel sheet and normalize the header row placement.
 
     Promotes the first row to the header to preserve legacy behavior.
+
+    Args:
+        path: File system path to the Excel file.
+        sheet: Sheet name to read.
+
+    Returns:
+        pd.DataFrame: Parsed table with the first row promoted to header.
+
+    Raises:
+        ParseError: On I/O or unexpected sheet format.
     """
     try:
         df = pd.read_excel(path, sheet_name=sheet)
@@ -39,10 +49,22 @@ def _read_excel_safe(path, sheet: str) -> pd.DataFrame:
 def parse_group(group: Group, cfg: FinderConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Read ribbons, PSDs, and positions for a single group.
 
+    Note:
+        `group.file_paths` stores **role** keys ("ribbons"|"psds"|"positions"),
+        not the suffix tokens. That is why we index by the role strings here.
+
+    Args:
+        group: Group container with role→path mapping.
+        cfg: Configuration; used for object labels and mode.
+
     Returns:
-        (ribbons_df, psds_df, positions_df). Ribbons/PSDs frames may be empty.
+        Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: (ribbons_df, psds_df, positions_df).
+        Ribbons/PSDs frames may be empty depending on mode.
+
+    Raises:
+        ParseError: If the required Position sheet is missing.
     """
-    pos_path = group.file_paths.get(cfg.positions)
+    pos_path = group.file_paths.get("positions")
     if pos_path is None:
         raise ParseError(f"Positions file (token '{cfg.positions}') missing for '{group.id}'.")
 
@@ -52,7 +74,7 @@ def parse_group(group: Group, cfg: FinderConfig) -> Tuple[pd.DataFrame, pd.DataF
 
     ribbons_df: Optional[pd.DataFrame]
     if cfg.mode in (InputMode.BOTH, InputMode.RIBBONS_ONLY):
-        rib_path = group.file_paths.get(cfg.ribbons)
+        rib_path = group.file_paths.get("ribbons")
         if rib_path is not None:
             ribbons_df = _read_excel_safe(rib_path, "Volume")
             ribbons_df["id"] = group.id
@@ -65,7 +87,7 @@ def parse_group(group: Group, cfg: FinderConfig) -> Tuple[pd.DataFrame, pd.DataF
 
     psds_df: Optional[pd.DataFrame]
     if cfg.mode in (InputMode.BOTH, InputMode.PSDS_ONLY):
-        psd_path = group.file_paths.get(cfg.psds)
+        psd_path = group.file_paths.get("psds")
         if psd_path is not None:
             psds_df = _read_excel_safe(psd_path, "Volume")
             psds_df["id"] = group.id

@@ -10,7 +10,7 @@ def configure_logging(level: int = logging.INFO) -> Logger:
     """Configure the root logger once in an idempotent manner.
 
     Args:
-        level: Logging level (e.g., ``logging.INFO``).
+        level: Logging level (e.g., logging.INFO).
 
     Returns:
         Logger: The configured root logger.

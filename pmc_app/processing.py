@@ -12,6 +12,12 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
 
     Produces a subset with columns: ``['id', 'ihc_label', 'object', 'object_id', 'volume']``.
     If no ``Set N`` columns are present or the frame is empty, returns a best-effort subset.
+
+    Args:
+        df: Raw 'Volume' sheet.
+
+    Returns:
+        pd.DataFrame: Normalized table.
     """
     out_cols = ["id", "ihc_label", "object", "object_id", "volume"]
 
@@ -24,6 +30,7 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
         existing = [c for c in out_cols if c in df.columns]
         return df[existing].copy()
 
+    # derive IHC label from first non-empty 'Set N' hit per row
     mask = df[set_cols].notna() & (df[set_cols].astype(str).apply(lambda s: s.str.strip()) != "")
     has_any = mask.fillna(False).filter(like="Set").any(axis=1)
     set_col_series = mask.fillna(False).idxmax(axis=1).where(has_any)
@@ -40,8 +47,15 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
 def process_position_df(df: pd.DataFrame, cfg: FinderConfig) -> pd.DataFrame:
     """Normalize 'Position' sheet columns and derive apical/basal marks.
 
-    The apical anchor is the minimum object_id within an IHC, and the basal
-    anchor is the maximum object_id.
+    We keep coordinates as (pos_x, pos_y, pos_z) and infer IHC labels from
+    Surpass Object names that look like "Spots <N>".
+
+    Args:
+        df: Raw 'Position' sheet.
+        cfg: Finder configuration (currently unused; kept for symmetry).
+
+    Returns:
+        pd.DataFrame: Normalized positions with inferred 'ihc_label' and apical/basal tags.
     """
     df = df.rename(
         columns={
@@ -56,8 +70,10 @@ def process_position_df(df: pd.DataFrame, cfg: FinderConfig) -> pd.DataFrame:
     out_cols = ["id", "object", "object_id", "pos_x", "pos_y", "pos_z"]
     df = df[[c for c in out_cols if c in df.columns]].copy()
 
+    # extract numeric label from "Spots <N>" names (only rows that have such names)
     df["ihc_label"] = df["object"].astype(str).str.extract(r"^Spots\s*(\d+)", expand=False)
 
+    # within each IHC label, lowest object_id = apical; highest = basal
     mask = df["ihc_label"].notna()
     min_id_masked = df.loc[mask].groupby("ihc_label")["object_id"].transform("min")
     max_id_masked = df.loc[mask].groupby("ihc_label")["object_id"].transform("max")
@@ -81,6 +97,15 @@ def merge_dfs(
 
     Unlabeled synapses are re-tagged as ``"Unclassified <object>"`` so they can
     be excluded from classification and clearly reported.
+
+    Args:
+        ribbons_df: Normalized ribbons volume table.
+        psds_df: Normalized PSDs volume table.
+        positions_df: Normalized positions table.
+        cfg: Finder configuration with object names.
+
+    Returns:
+        pd.DataFrame: Unified table ready for classification.
     """
     df_synapses = pd.concat([psds_df, ribbons_df], ignore_index=True)
     df = df_synapses.merge(

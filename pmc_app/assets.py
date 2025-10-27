@@ -11,11 +11,10 @@ from typing import Optional
 def resource_path(name: str, *, package: str = "pmc_app.resources") -> str:
     """Return a filesystem path to a packaged resource in a PyInstaller-safe way.
 
-    Resolves a resource whether the app runs from source or from a PyInstaller
-    bundle (using ``sys._MEIPASS``).
+    Resolves a resource whether the app runs from source or from a PyInstaller bundle.
 
     Args:
-        name: Resource filename (e.g., ``"icon.ico"``).
+        name: Resource filename (e.g., "icon.ico").
         package: Dotted package path that contains the resources.
 
     Returns:
@@ -30,7 +29,6 @@ def resource_path(name: str, *, package: str = "pmc_app.resources") -> str:
     resource = files(package) / name
     try:
         from importlib.resources import as_file
-
         with as_file(resource) as tmp:
             return str(tmp)
     except Exception:

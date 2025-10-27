@@ -1,6 +1,6 @@
 [project]
 name = "pillar-modiolar-classifier"
-version = "1.0.0"
+version = "1.4.0"
 description = "Standalone Napari-based Pillar–Modiolar synapse classifier"
 readme = "README.md"
 requires-python = ">=3.11"

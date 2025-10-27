@@ -12,6 +12,9 @@ from qtpy.QtWidgets import QFileDialog, QWidget
 def prompt_export_dir(parent: QWidget | None = None) -> Path | None:
     """Open a native select-directory dialog.
 
+    Args:
+        parent: Optional parent widget.
+
     Returns:
         Path | None: The selected directory, or None if the dialog was canceled.
     """

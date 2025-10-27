@@ -1,4 +1,4 @@
-"""GUI for the Pillar–Modiolar Classifier built with magicgui/Qt and napari."""
+"""GUI for the Pillar–Modiolar Classifier."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ from qtpy.QtWidgets import (
 
 from .assets import resource_path
 from .classifier import build_hc_planes, build_pm_planes, classify_synapses, identify_poles
-from .exceptions import GroupValidationError
+from .exceptions import ConfigError, GroupValidationError
 from .exporter import export_df_csv, prompt_export_dir
 from .finder import find_groups
 from .logging_config import configure_logging
@@ -242,7 +242,6 @@ class ToolTipDelayFilter(QObject):
             return False
 
         if t == QEvent.ToolTip:
-            # suppress default immediate tooltip
             return True
 
         return False
@@ -423,7 +422,6 @@ class App:
         self.w_pillar_obj.native.setToolTip(_wrap_tt(TT.pillar_obj_id))
         self.w_modiolar_obj.native.setToolTip(_wrap_tt(TT.modiolar_obj_id))
 
-        # Sizing
         def _min_w(widget, w: int, expanding: bool = False) -> None:
             widget.native.setMinimumWidth(w)
             if expanding:
@@ -447,7 +445,6 @@ class App:
             b.native.setMaximumWidth(EXPORT_BTN_W)
             b.native.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-        # --- Layout -------------------------------------------------------------------
         source_controls = Container(widgets=[self.w_case_insensitive], layout="horizontal", labels=False)
         set_layout(source_controls, margins=(0, 0, 0, 0), spacing=S_CASE_IDENTIFY)
 
@@ -578,7 +575,6 @@ class App:
         self.panel = Container(widgets=[grp_import, grp_objects, grp_nav, grp_export, grp_log], layout="vertical", labels=False)
         set_layout(self.panel, margins=MARGINS_APP_AREA, spacing=BETWEEN_CARD_PADDING)
 
-        # tooltip delay filter
         self._tt_filter = ToolTipDelayFilter(parent=self.panel.native)
         for w in [
             self.w_case_insensitive.native,
@@ -627,7 +623,6 @@ class App:
         self.btn_prev.changed.connect(lambda *_: self.on_prev())
         self.btn_next.changed.connect(lambda *_: self.on_next())
 
-
     def log(self, *args, level: int | None = None) -> None:
         """Append a log line to the GUI and emit via the Python logger.
 
@@ -659,7 +654,6 @@ class App:
         self.txt_log.native.verticalScrollBar().setValue(0)
 
         self._pylogger.log(lvl, msg)
-
 
     def _process_events(self) -> None:
         """Safely flush the Qt event loop (instance method form)."""
@@ -701,7 +695,6 @@ class App:
         self._progress.hide()
         self._progress_total = None
         self._progress_value = 0
-
 
     def _remember_enabled(self) -> bool:
         """Return whether input persistence is enabled (default True)."""
@@ -867,10 +860,14 @@ class App:
         )
 
     def _make_cfg(self) -> FinderConfig:
-        """Construct a ``FinderConfig`` from UI values with basic validation."""
+        """Construct a ``FinderConfig`` from UI values with basic validation.
+
+        Raises:
+            ConfigError: If no folder is selected.
+        """
         folder_v = self.w_folder.value
         if folder_v is None:
-            raise ValueError("Please select a folder.")
+            raise ConfigError("Please select a folder.")
         folder_path = Path(folder_v)
         return FinderConfig(
             folder=folder_path,
@@ -888,7 +885,6 @@ class App:
             identify_poles=bool(self.w_identify_poles.value),
             remember_input_fields=self._remember_enabled(),
         )
-
 
     def _build_df_for_group(self, gid: str) -> tuple[pd.DataFrame, object]:
         """Build the processed dataframe and plane bundles for a group id."""
@@ -948,7 +944,6 @@ class App:
         msg = f"{n_rib} ribbon(s) and {n_psd} PSD(s) were not allocated to any IHCs and are excluded from classification."
         return msg
 
-
     def _confirm_export_dir(self) -> Path | None:
         """Return the selected export directory, prompting if empty."""
         val = self.w_export_dir.value
@@ -979,8 +974,7 @@ class App:
                 self.cbo_group.value = gids[0]
                 self.log(f"Loaded {len(gids)} ID(s).")
             else:
-                self.log(
-                    "No groups found. Check your suffixes/extensions and folder.")
+                self.log("No groups found. Check your suffixes/extensions and folder.")
         except GroupValidationError as e:
             self.groups = e.groups or {}
             gids = sorted(self.groups.keys())
@@ -1147,7 +1141,6 @@ class App:
             self.cbo_group.value = choices[idx + 1]
             self.on_assess_selected()
 
-
     def show(self) -> None:
         """Create and show the main window if needed."""
         if getattr(self, "_window", None) is None:
@@ -1182,7 +1175,7 @@ def launch_gui() -> None:
     Ensures logging is configured once (idempotent) so that all self.log(...)
     messages also appear in the terminal.
     """
-    configure_logging()  # <-- sets root StreamHandler -> terminal
+    configure_logging()
     logging.getLogger("pmc.gui").info("Launching Pillar–Modiolar Classifier GUI")
     app = App()
     app.show()

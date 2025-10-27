@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from weakref import WeakKeyDictionary
 from typing import Any
+from weakref import WeakKeyDictionary
 
 import napari
 import numpy as np
@@ -50,8 +50,8 @@ def draw_objects(
     Args:
         df: Unified dataframe with points, volumes, and classification columns.
         cfg: Finder configuration (object names and flags).
-        pm_bundle: Tuple ``(pm_planes, pm_labels)`` with 4×3 ZYX rectangles.
-        hc_bundle: Tuple ``(hc_planes, hc_labels)`` with 4×3 ZYX rectangles.
+        pm_bundle: Tuple (pm_planes, pm_labels) with 4×3 ZYX rectangles.
+        hc_bundle: Tuple (hc_planes, hc_labels) with 4×3 ZYX rectangles.
         viewer: Optional viewer to reuse (cleared before redraw).
 
     Returns:
