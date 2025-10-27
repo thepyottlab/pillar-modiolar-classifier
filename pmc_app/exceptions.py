@@ -10,10 +10,12 @@ class PmcError(Exception):
 class ConfigError(PmcError):
     """Raised on configuration or input validation errors."""
 
-
 class ParseError(PmcError):
     """Raised when reading/parsing input files fails."""
 
 
 class ProcessingError(PmcError):
     """Raised when transforming or merging data fails."""
+
+class GroupValidationError(PmcError):
+    """Raised when one or more groups fail required token checks."""

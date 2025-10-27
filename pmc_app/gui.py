@@ -39,12 +39,14 @@ from qtpy.QtWidgets import (
 
 from .assets import resource_path
 from .classifier import build_hc_planes, build_pm_planes, classify_synapses, identify_poles
+from .exceptions import GroupValidationError
 from .exporter import export_df_csv, prompt_export_dir
 from .finder import find_groups
-from .logging_config import configure_logging  # <-- wire in logging config
+from .logging_config import configure_logging
 from .models import FinderConfig, Group
 from .parser import parse_group
 from .processing import merge_dfs, process_position_df, process_volume_df
+from .visualizer import draw_objects
 
 
 @dataclass(frozen=True)
@@ -268,11 +270,6 @@ def _user_config_dir() -> Path:
 def _user_config_path() -> Path:
     """Return the user config file path."""
     return _user_config_dir() / CONFIG_FILENAME
-
-
-def _legacy_config_path() -> Path:
-    """Return the legacy config path in the working directory."""
-    return Path("config.ini")
 
 
 def _read_config_from(path: Path) -> configparser.ConfigParser | None:
@@ -755,17 +752,6 @@ class App:
             except Exception:
                 pass
             user_cfg = cp
-        else:
-            legacy = _read_config_from(_legacy_config_path())
-            if legacy is not None:
-                try:
-                    cfg_path = _user_config_path()
-                    _ensure_parent_dir(cfg_path)
-                    with cfg_path.open("w", encoding="utf-8") as f:
-                        legacy.write(f)
-                    user_cfg = legacy
-                except Exception:
-                    pass
 
         if "inputs" not in user_cfg:
             return
@@ -993,7 +979,16 @@ class App:
                 self.cbo_group.value = gids[0]
                 self.log(f"Loaded {len(gids)} ID(s).")
             else:
-                self.log("No groups found. Check your suffixes/extensions and folder.")
+                self.log(
+                    "No groups found. Check your suffixes/extensions and folder.")
+        except GroupValidationError as e:
+            self.groups = e.groups or {}
+            gids = sorted(self.groups.keys())
+            self.cbo_group.choices = gids
+            if gids:
+                self.cbo_group.value = gids[0]
+                self.log(f"Loaded {len(gids)} ID(s).")
+            self.log(f"[warn] {e}")
         except Exception as e:
             self.log(f"[error] Identify files: {e}")
 
@@ -1069,7 +1064,6 @@ class App:
 
     def _open_viewer(self, df: pd.DataFrame, plane_bundles) -> napari.Viewer:
         """Create or reuse a viewer and draw the current dataset."""
-        from .visualizer import draw_objects
         reuse = self.current_viewer if (self.current_viewer is not None and getattr(self.current_viewer, "window", None) is not None) else None
         pm_bundle, hc_bundle = plane_bundles
         viewer = draw_objects(df, self.cfg, pm_bundle, hc_bundle, viewer=reuse)
