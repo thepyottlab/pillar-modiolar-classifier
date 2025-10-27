@@ -274,12 +274,7 @@ def draw_objects(
             except Exception:
                 pass
             layer.data = pos3
-            if n == 0:
-                layer.features = pd.DataFrame({"label": []})
-                layer.text.string = ""
-            else:
-                layer.features = pd.DataFrame({"label": lab})
-                layer.text.string = "{label}"
+            layer.text.string = {'array':lab}
             try:
                 layer.text.visible = prev_vis
             except Exception:
