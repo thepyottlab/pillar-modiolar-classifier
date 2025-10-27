@@ -6,9 +6,9 @@
 A small **Napari-based** desktop app to help analyze inner hair cell (IHC) synapses. It:
 
 * Loads groups of `.xls` files named with suffix tokens (e.g., `ID A ribbon.xls`, `ID A psd.xls`, `ID A sum.xls`)
-* Builds per-IHC pillar–modiolar planes
+* Builds per-IHC pillar–modiolar and habenular-cuticular planes
 * Classifies synapses (pillar vs. modiolar)
-* Computes signed distances to the finite plane
+* Computes distances to the planes
 * Visualizes results in 3D and exports CSVs
 
 > **Target platform:** Windows (10/11).
@@ -49,13 +49,13 @@ A small **Napari-based** desktop app to help analyze inner hair cell (IHC) synap
 
    * Ribbon volumes
    * PSD volumes
-   * Position table
+   * Spot/Surface positions 
 4. Use **Ribbons only** or **PSDs only** if you want to restrict processing.
-5. Click **Load files** — detected IDs appear under **Loaded IDs**.
-6. Set the **Object names** to match your Imaris labels (IHC, pillar, modiolar, ribbons, PSDs).
+5. Click **Load files**. Detected IDs appear under **Loaded IDs**.
+6. Set the **Object names** to match your Imaris labels (IHC, pillar, modiolar, ribbons, PSDs), confirm object names with enter or use 'Update all fields'.
 7. Click **Assess selected (open in viewer)** to visualize, or use the **Export** section to write classified CSVs with plane distances.
 
-The log shows progress and a compact progress bar while a dataset is opening or re-rendering.
+The log shows progress while a dataset is opening or re-rendering.
 
 ---
 
@@ -70,9 +70,9 @@ ID A sum.xls      # positions (apical/basal/IHC etc.)
 ```
 
 * The **suffix tokens** (e.g., `ribbon`, `psd`, `sum`) are configurable in the UI.
-* Filenames must end with `"<space><token><extension>"`.
+* Filenames must end with `"<token><extension>"`.
   Example: `Some Prefix ID A ribbon.xls`
-* The app can run **Ribbons only** or **PSDs only**, but still needs the **positions** table.
+* The app can run using **Ribbons only** or **PSDs only**, but still needs the **positions** table.
 
 ---
 
@@ -81,7 +81,7 @@ ID A sum.xls      # positions (apical/basal/IHC etc.)
 * The viewer shows:
 
   * Points for ribbons, PSDs, and IHC/reference objects
-  * Per-IHC finite planes (pillar–modiolar)
+  * Per-IHC finite planes (pillar–modiolar, habenular-cuticular)
   * Optional distance vectors/labels
 * Right panel:
 
@@ -92,6 +92,7 @@ ID A sum.xls      # positions (apical/basal/IHC etc.)
 
   * Use **Prev/Next** in the main window to switch loaded groups
   * The viewer stays open; layers and controls are rebuilt for the new group
+  * Scroll to zoom, drag to rotate, hold shift and drag to pan
 
 ---
 
@@ -105,12 +106,14 @@ ID A sum.xls      # positions (apical/basal/IHC etc.)
 
 ## Tips & troubleshooting
 
-* **Object names must match Imaris**: Ensure IHC, pillar, and modiolar labels in the app match the object names used in your exported tables.
+* **Hover for info**: Hover over any of the input fields under 'Import' or 'Object names' for additional info.
+* **Object names must match Imaris**: Ensure ribbon, PSD, pillar, and modiolar labels in the app match the object names used in your exported tables.
 * **Suffix tokens**: If “Load files” finds no groups, double-check your suffix tokens and file extension in the **Import** section.
 * **Viewer closed manually**: Just click **Assess selected** again, the app will reopen the viewer.
 * **Ribbons-only / PSDs-only**: These modes hide the other modality’s UI toggles and processing where appropriate.
 * **Double classification**: If a ribbon or PSD is classified under multiple IHCs, which may happen when it is on the border of two IHCs, the script will classify it to be part of the IHC with the lower number.
-* **Plane definition**: The pillar–modiolar plane is derived from the apical and basal spots on each inner hair cell and bounded by the outermost ribbon and PSD coordinates in the XY plane. The Z-position of the plane is held constant, meaning its accuracy depends on the cochlea being mounted flat. If the Z-stack is uneven (e.g., the inner hair cells are on a fold) or the inner hair cells are rotated or tilted, the plane may not accurately separate the pillar and modiolar sides.
+* **Pillar-Modiolar plane definition**: The pillar–modiolar plane is derived from the apical and basal spots on each inner hair cell and bounded by the outermost ribbon and PSD coordinates in the XY plane. The Z-position of the plane is held constant, meaning its accuracy depends on the cochlea being mounted flat. If the Z-stack is uneven (e.g., the inner hair cells are on a fold) or the inner hair cells are rotated or tilted, the plane may not accurately separate the pillar and modiolar sides.
+* **habenular-cuticular plane definition**: The habenular-cuticular plane uses the basal spot as its base and is placed perpendicular to the pillar-modiolar plane.
 
 ---
 
@@ -126,7 +129,7 @@ Requirements:
 git clone https://github.com/thepyottlab/pillar-modiolar-classifier
 cd pillar-modiolar-classifier
 
-# create and activate a venv (PowerShell example)
+# create and activate a venv
 python -m venv .venv
 .venv\Scripts\activate
 

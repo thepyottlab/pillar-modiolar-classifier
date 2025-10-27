@@ -4,6 +4,6 @@ app."""
 from __future__ import annotations
 
 __all__ = ["launch_gui"]
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 from .gui import launch_gui  # noqa: E402
