@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
 from weakref import WeakKeyDictionary
 from typing import Any
 
@@ -11,12 +10,6 @@ import numpy as np
 import pandas as pd
 from magicgui.widgets import CheckBox, Container, PushButton
 from numpy.typing import NDArray
-
-warnings.filterwarnings(
-    "ignore",
-    message=r"Applying the encoding failed\. Using the safe fallback value instead\.",
-    module="napari.layers.utils.style_encoding",
-)
 
 _VIEWER_STATE = WeakKeyDictionary()
 

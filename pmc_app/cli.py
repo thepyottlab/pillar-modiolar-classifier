@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -11,10 +12,13 @@ from .classifier import build_hc_planes, build_pm_planes, classify_synapses
 from .exporter import export_df_csv
 from .finder import find_groups
 from .gui import launch_gui
+from .logging_config import configure_logging
 from .models import FinderConfig
 from .parser import parse_group
 from .processing import merge_dfs, process_position_df, process_volume_df
 
+configure_logging()
+logger = logging.getLogger(__name__)
 app = typer.Typer(help="Pillar–Modiolar Classifier CLI")
 
 
@@ -70,7 +74,7 @@ def export_all(
 
     groups = find_groups(cfg)
     if not groups:
-        typer.echo("No groups found.")
+        logger.info("No groups found.")
         raise typer.Exit(1)
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -86,8 +90,9 @@ def export_all(
 
         df = classify_synapses(df, cfg, pm_bundle, hc_bundle)
         export_df_csv(df, gid, out_dir)
+        logger.info("Exported %s to %s", gid, out_dir)
 
-    typer.echo(f"Exported {len(groups)} group(s) to {out_dir}")
+    logger.info("Exported %d group(s) to %s", len(groups), out_dir)
 
 
 if __name__ == "__main__":

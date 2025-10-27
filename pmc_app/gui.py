@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import configparser
+import logging
 import os
 import textwrap
 from dataclasses import asdict, dataclass
@@ -40,6 +41,7 @@ from .assets import resource_path
 from .classifier import build_hc_planes, build_pm_planes, classify_synapses, identify_poles
 from .exporter import export_df_csv, prompt_export_dir
 from .finder import find_groups
+from .logging_config import configure_logging  # <-- wire in logging config
 from .models import FinderConfig, Group
 from .parser import parse_group
 from .processing import merge_dfs, process_position_df, process_volume_df
@@ -48,7 +50,6 @@ from .processing import merge_dfs, process_position_df, process_volume_df
 @dataclass(frozen=True)
 class TooltipText:
     """Static tooltip copy for the GUI."""
-
     case_insensitive: str = "Ignore letter case when matching file names, extensions, and identifiers."
     file_extension: str = "File extension of the Imaris exports."
     ribbons_sheet_id: str = "Suffix/identifier used for presynaptic ribbon volume sheets."
@@ -69,7 +70,6 @@ class TooltipText:
 
 TOOLTIP_WRAP_CH = 72
 TOOLTIP_DELAY_MS = 600
-
 TT = TooltipText()
 
 APP_WIDTH = 667
@@ -214,12 +214,7 @@ class ToolTipDelayFilter(QObject):
     """Event filter that implements a consistent tooltip delay."""
 
     def __init__(self, delay_ms: int = TOOLTIP_DELAY_MS, parent: QObject | None = None):
-        """Initialize the filter.
-
-        Args:
-            delay_ms: Delay in milliseconds before showing tooltips.
-            parent: Optional parent QObject.
-        """
+        """Initialize the filter."""
         super().__init__(parent)
         self._delay: int = delay_ms
         self._timer = QTimer(self)
@@ -238,14 +233,14 @@ class ToolTipDelayFilter(QObject):
                 self._timer.start(self._delay)
             return False
 
-        if t in (QEvent.Leave, QEvent.HoverLeave, QEvent.FocusOut,
-                 QEvent.MouseButtonPress):
+        if t in (QEvent.Leave, QEvent.HoverLeave, QEvent.FocusOut, QEvent.MouseButtonPress):
             self._timer.stop()
             self._target = None
             QToolTip.hideText()
             return False
 
         if t == QEvent.ToolTip:
+            # suppress default immediate tooltip
             return True
 
         return False
@@ -256,6 +251,7 @@ class ToolTipDelayFilter(QObject):
         if tgt is not None:
             pos = tgt.mapToGlobal(tgt.rect().center())
             QToolTip.showText(pos, tgt.toolTip(), tgt)
+
 
 def _user_config_dir() -> Path:
     """Return and create (if missing) the user config directory."""
@@ -377,6 +373,8 @@ class App:
 
     def __init__(self) -> None:
         """Create the UI, wire events, and load persisted inputs."""
+        self._pylogger = logging.getLogger("pmc.gui")
+
         self.w_folder = FileEdit(label="Folder", mode=FileDialogMode.EXISTING_DIRECTORY, value=None)
         self.w_case_insensitive = CheckBox(label="Case insensitive", value=True)
 
@@ -428,6 +426,7 @@ class App:
         self.w_pillar_obj.native.setToolTip(_wrap_tt(TT.pillar_obj_id))
         self.w_modiolar_obj.native.setToolTip(_wrap_tt(TT.modiolar_obj_id))
 
+        # Sizing
         def _min_w(widget, w: int, expanding: bool = False) -> None:
             widget.native.setMinimumWidth(w)
             if expanding:
@@ -451,6 +450,7 @@ class App:
             b.native.setMaximumWidth(EXPORT_BTN_W)
             b.native.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
+        # --- Layout -------------------------------------------------------------------
         source_controls = Container(widgets=[self.w_case_insensitive], layout="horizontal", labels=False)
         set_layout(source_controls, margins=(0, 0, 0, 0), spacing=S_CASE_IDENTIFY)
 
@@ -581,6 +581,7 @@ class App:
         self.panel = Container(widgets=[grp_import, grp_objects, grp_nav, grp_export, grp_log], layout="vertical", labels=False)
         set_layout(self.panel, margins=MARGINS_APP_AREA, spacing=BETWEEN_CARD_PADDING)
 
+        # tooltip delay filter
         self._tt_filter = ToolTipDelayFilter(parent=self.panel.native)
         for w in [
             self.w_case_insensitive.native,
@@ -629,14 +630,39 @@ class App:
         self.btn_prev.changed.connect(lambda *_: self.on_prev())
         self.btn_next.changed.connect(lambda *_: self.on_next())
 
-    def log(self, *args) -> None:
-        """Append a log line with timestamp to the log panel."""
+
+    def log(self, *args, level: int | None = None) -> None:
+        """Append a log line to the GUI and emit via the Python logger.
+
+        - If message starts with ``[error]``, ``[warn]``, or ``[debug]`` (case-insensitive),
+          the corresponding logging level is used and the prefix is stripped.
+        - Otherwise INFO level is used (or an explicit ``level`` if provided).
+        """
+        raw = " ".join(str(a) for a in args)
+        msg = raw
+        lvl = level or logging.INFO
+
+        prefix_map = {
+            "[error]": logging.ERROR,
+            "[warn]": logging.WARNING,
+            "[warning]": logging.WARNING,
+            "[debug]": logging.DEBUG,
+        }
+        low = raw.strip().lower()
+        for prefix, plvl in prefix_map.items():
+            if low.startswith(prefix):
+                lvl = plvl
+                msg = raw[len(prefix):].lstrip()
+                break
+
         ts = datetime.now().strftime("%H:%M:%S")
-        msg = " ".join(str(a) for a in args)
         line = f"{ts} | {msg}"
         prev = self.txt_log.value or ""
         self.txt_log.value = line + "\n" + prev
         self.txt_log.native.verticalScrollBar().setValue(0)
+
+        self._pylogger.log(lvl, msg)
+
 
     def _process_events(self) -> None:
         """Safely flush the Qt event loop (instance method form)."""
@@ -678,6 +704,7 @@ class App:
         self._progress.hide()
         self._progress_total = None
         self._progress_value = 0
+
 
     def _remember_enabled(self) -> bool:
         """Return whether input persistence is enabled (default True)."""
@@ -935,6 +962,7 @@ class App:
         msg = f"{n_rib} ribbon(s) and {n_psd} PSD(s) were not allocated to any IHCs and are excluded from classification."
         return msg
 
+
     def _confirm_export_dir(self) -> Path | None:
         """Return the selected export directory, prompting if empty."""
         val = self.w_export_dir.value
@@ -965,8 +993,7 @@ class App:
                 self.cbo_group.value = gids[0]
                 self.log(f"Loaded {len(gids)} ID(s).")
             else:
-                self.log(
-                    "No groups found. Check your suffixes/extensions and folder.")
+                self.log("No groups found. Check your suffixes/extensions and folder.")
         except Exception as e:
             self.log(f"[error] Identify files: {e}")
 
@@ -1043,7 +1070,6 @@ class App:
     def _open_viewer(self, df: pd.DataFrame, plane_bundles) -> napari.Viewer:
         """Create or reuse a viewer and draw the current dataset."""
         from .visualizer import draw_objects
-
         reuse = self.current_viewer if (self.current_viewer is not None and getattr(self.current_viewer, "window", None) is not None) else None
         pm_bundle, hc_bundle = plane_bundles
         viewer = draw_objects(df, self.cfg, pm_bundle, hc_bundle, viewer=reuse)
@@ -1127,6 +1153,7 @@ class App:
             self.cbo_group.value = choices[idx + 1]
             self.on_assess_selected()
 
+
     def show(self) -> None:
         """Create and show the main window if needed."""
         if getattr(self, "_window", None) is None:
@@ -1156,7 +1183,13 @@ class App:
 
 
 def launch_gui() -> None:
-    """Launch the GUI and start the napari event loop."""
+    """Launch the GUI and start the napari event loop.
+
+    Ensures logging is configured once (idempotent) so that all self.log(...)
+    messages also appear in the terminal.
+    """
+    configure_logging()  # <-- sets root StreamHandler -> terminal
+    logging.getLogger("pmc.gui").info("Launching Pillar–Modiolar Classifier GUI")
     app = App()
     app.show()
     napari.run()
