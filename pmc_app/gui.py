@@ -8,7 +8,6 @@ import textwrap
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
 
 import napari
 import pandas as pd
@@ -24,7 +23,7 @@ from magicgui.widgets import (
     TextEdit,
 )
 from qtpy.QtCore import QEvent, QObject, QTimer
-from qtpy.QtGui import QColor, QCursor, QFontMetrics, QIcon, QPaintEvent, QPainter
+from qtpy.QtGui import QColor, QFontMetrics, QIcon, QPaintEvent, QPainter
 from qtpy.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -239,6 +238,13 @@ class ToolTipDelayFilter(QObject):
                 self._timer.start(self._delay)
             return False
 
+        if t in (QEvent.Leave, QEvent.HoverLeave, QEvent.FocusOut,
+                 QEvent.MouseButtonPress):
+            self._timer.stop()
+            self._target = None
+            QToolTip.hideText()
+            return False
+
         if t == QEvent.ToolTip:
             return True
 
@@ -248,8 +254,8 @@ class ToolTipDelayFilter(QObject):
         """Show the delayed tooltip for the current target, if any."""
         tgt = self._target
         if tgt is not None:
-            QToolTip.showText(QCursor.pos(), tgt.toolTip(), tgt)
-
+            pos = tgt.mapToGlobal(tgt.rect().center())
+            QToolTip.showText(pos, tgt.toolTip(), tgt)
 
 def _user_config_dir() -> Path:
     """Return and create (if missing) the user config directory."""
@@ -870,52 +876,6 @@ class App:
             remember_input_fields=self._remember_enabled(),
         )
 
-    def _found_suffix_tokens(self, folder: Path, extension: str, tokens: Iterable[str], ci: bool) -> set[str]:
-        """Return which suffix tokens are present in a folder for the given extension."""
-        ext = extension.lower()
-        found: set[str] = set()
-        for p in folder.iterdir():
-            if not p.is_file():
-                continue
-            if p.suffix.lower() != ext:
-                continue
-            stem = p.stem
-            for s in tokens:
-                token = f"{s}"
-                if ci:
-                    if stem.lower().endswith(token.lower()):
-                        found.add(s)
-                else:
-                    if stem.endswith(token):
-                        found.add(s)
-        return found
-
-    def _verify_required_filename_tokens(self, cfg: FinderConfig) -> None:
-        """Verify that required tokenized files exist in the selected folder.
-
-        Raises:
-            RuntimeError: If any required token cannot be found.
-        """
-        token_labels = {
-            cfg.ribbons: "Ribbon volume sheet ID",
-            cfg.psds: "PSD volume sheet ID",
-            cfg.positions: "Position sheet ID",
-        }
-        tokens_to_check: list[str] = []
-        if not cfg.psds_only:
-            tokens_to_check.append(cfg.ribbons)
-        if not cfg.ribbons_only:
-            tokens_to_check.append(cfg.psds)
-        tokens_to_check.append(cfg.positions)
-        present = self._found_suffix_tokens(Path(cfg.folder), cfg.extensions, tokens_to_check, cfg.case_insensitive)
-        missing = [t for t in tokens_to_check if t not in present]
-        if missing:
-            lines = [
-                f"No files found with {token_labels.get(t, 'ID')} '{t}' in folder {Path(cfg.folder)} "
-                f"(extension {cfg.extensions})."
-                for t in missing
-            ]
-            raise RuntimeError("\n".join(lines))
 
     def _build_df_for_group(self, gid: str) -> tuple[pd.DataFrame, object]:
         """Build the processed dataframe and plane bundles for a group id."""
@@ -998,7 +958,6 @@ class App:
         self.cfg = self._make_cfg()
         self._persist_inputs_if_enabled()
         try:
-            self._verify_required_filename_tokens(self.cfg)
             self.groups = find_groups(self.cfg) or {}
             gids = sorted(self.groups.keys())
             self.cbo_group.choices = gids
@@ -1006,7 +965,8 @@ class App:
                 self.cbo_group.value = gids[0]
                 self.log(f"Loaded {len(gids)} ID(s).")
             else:
-                self.log("No groups found. Check your suffixes/extensions and folder.")
+                self.log(
+                    "No groups found. Check your suffixes/extensions and folder.")
         except Exception as e:
             self.log(f"[error] Identify files: {e}")
 
