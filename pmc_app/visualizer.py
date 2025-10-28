@@ -64,7 +64,6 @@ def draw_objects(
 
     pm_planes: list[np.ndarray]
     pm_labels: list[str]
-
     if pm_bundle is None:
         pm_planes, pm_labels = [], []
     else:
@@ -232,18 +231,54 @@ def draw_objects(
             return 2.0
         return 1.0
 
+    def _coerce_pts(pts: Any) -> np.ndarray:
+        pts = np.asarray(pts, float)
+        if pts.ndim == 1:
+            return pts.reshape((0, 3)) if pts.size == 0 else pts.reshape((1, 3))
+        if pts.ndim != 2 or (pts.size > 0 and pts.shape[1] != 3):
+            return np.zeros((0, 3), float)
+        return pts
+
+    def _coerce_sizes(sizes: Any, n: int) -> np.ndarray:
+        if np.ndim(sizes) == 0:
+            sz = float(sizes) if n > 0 else 0.0
+            return np.full((n,), sz, float)
+        arr = np.asarray(sizes, float)
+        return arr.reshape((n,)) if n > 0 else np.array([], float)
+
+    def _coerce_colors(colors: Any, n: int) -> np.ndarray:
+        col = np.asarray(colors, np.float32)
+        if col.ndim == 1 and col.size == 4:
+            return np.tile(col, (n, 1))
+        out = np.ones((n, 4), np.float32)
+        if col.ndim == 2 and col.size > 0:
+            m = min(n, col.shape[0])
+            k = min(4, col.shape[1])
+            if m:
+                out[:m, :k] = col[:m, :k]
+        return out
+
     def update_points(
         layer: napari.layers.Points,
         pts: NDArray[np.float64],
         sizes: Any,
         colors: NDArray[np.float32],
     ) -> None:
-        """Batch-update a points layer without intermediate repaints."""
-        with layer.events.blocker_all():
-            layer.data = pts
-            layer.size = sizes
-            layer.face_color = colors
-            layer.border_color = colors
+        """Safely update geometry first, then colors, avoiding stale view indices."""
+        pts = _coerce_pts(pts)
+        n = int(pts.shape[0])
+        sizes = _coerce_sizes(sizes, n)
+        colors = _coerce_colors(colors, n)
+
+        layer.data = pts
+        layer.size = sizes
+
+        with suppress(Exception):
+            layer._set_view_slice()
+        layer.refresh()
+
+        layer.face_color = colors
+        layer.border_color = colors
         layer.refresh()
 
     def update_shapes(layer: napari.layers.Shapes, data_list: list[np.ndarray]) -> None:
@@ -268,11 +303,7 @@ def draw_objects(
         """Batch-update a points layer used as stand-ins for text labels."""
         if layer is None:
             return
-        pos3 = np.asarray(pos3, float)
-        if pos3.ndim == 1:
-            pos3 = pos3.reshape((0, 3)) if pos3.size == 0 else pos3.reshape((1, 3))
-        elif pos3.ndim != 2 or (pos3.size > 0 and pos3.shape[1] != 3):
-            pos3 = np.zeros((0, 3), float)
+        pos3 = _coerce_pts(pos3)
         n = int(pos3.shape[0])
         if labels_txt is None:
             lab: list[str] = [""] * n
@@ -323,7 +354,7 @@ def draw_objects(
         layer.events.visible.connect(_on_visible_change)
 
     def track(layer: napari.layers.Layer | None, key: str) -> None:
-        """Helper: bind visibility and seed `user_vis` from the layer."""
+        """Bind visibility and seed `user_vis` from the layer."""
         bind_user_vis(layer, key, seed_from_layer=True)
 
     pm_layer = viewer.add_shapes(
@@ -585,13 +616,11 @@ def draw_objects(
     point_layers_order = list(point_layers.items())
     batching = False
 
-    def selected_labels_now() -> list[str]:
-        """Return current set of selected IHC labels in the dock."""
-        return [lab for lab, cb in checks.items() if cb.value]
+    current_df_points: pd.DataFrame | None = None
 
     def update_view(selected: list[str]) -> None:
         """Rebuild layers according to the selected labels."""
-        nonlocal vis_prog
+        nonlocal vis_prog, current_df_points
 
         empty_vec = np.zeros((0, 2, 3), float)
         empty_pts = np.zeros((0, 3), float)
@@ -655,6 +684,8 @@ def draw_objects(
                 if show_psd
                 else (empty_vec, empty_pts, empty_txt)
             )
+
+        current_df_points = df_points
 
         vis_prog = True
         try:
@@ -720,19 +751,47 @@ def draw_objects(
         update_label_points(distance_labels_ribbons_hc, mid_r_hc, txt_r_hc)
         update_label_points(distance_labels_psds_hc, mid_p_hc, txt_p_hc)
 
+    def recolor_layer_for_rows(
+        layer: napari.layers.Points, rows: pd.DataFrame, obj: str
+    ) -> None:
+        """Only recolor an existing points layer; do not change geometry."""
+        if not hasattr(layer, "data"):
+            return
+        n = len(getattr(layer, "data", []))
+        if n == 0:
+            return
+        cols = colors_for_rows(rows, obj)
+        cols = _coerce_colors(cols, n)
+        if cols.shape != (n, 4):
+            return
+        layer.face_color = cols
+        layer.border_color = cols
+        layer.refresh()
+
+    def recolor_only() -> None:
+        """Recompute colors for current selection without touching geometry."""
+        if current_df_points is None:
+            return
+        dfp = current_df_points
+        for obj, layer in point_layers_order:
+            rows = dfp.loc[dfp["object"] == obj]
+            if len(rows) == len(getattr(layer, "data", [])):
+                recolor_layer_for_rows(layer, rows, str(obj))
+
     def apply() -> None:
-        """Apply current toggles if not in a batch operation."""
+        """Apply current label selection (rebuild geometry and distances)."""
         if not batching:
             update_view([lab for lab, cb in checks.items() if cb.value])
 
     for cb in checks.values():
         cb.changed.connect(apply)
+
     if show_rib:
-        cb_pil_rib.changed.connect(apply)
-        cb_mod_rib.changed.connect(apply)
+        cb_pil_rib.changed.connect(recolor_only)
+        cb_mod_rib.changed.connect(recolor_only)
     if show_psd:
-        cb_pil_psd.changed.connect(apply)
-        cb_mod_psd.changed.connect(apply)
+        cb_pil_psd.changed.connect(recolor_only)
+        cb_mod_psd.changed.connect(recolor_only)
 
     def set_all(val: bool) -> None:
         """Set all label checkboxes to the same value and refresh."""
