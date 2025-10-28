@@ -113,7 +113,7 @@ ID A sum.xls      # positions (apical/basal/IHC etc.)
 * **Ribbons-only / PSDs-only**: These modes hide the other modality’s UI toggles and processing where appropriate.
 * **Double classification**: If a ribbon or PSD is classified under multiple IHCs, which may happen when it is on the border of two IHCs, the script will classify it to be part of the IHC with the lower number.
 * **Pillar-Modiolar plane definition**: The pillar–modiolar plane is derived from the apical and basal spots on each inner hair cell and bounded by the outermost ribbon and PSD coordinates in the XY plane. The Z-position of the plane is held constant, meaning its accuracy depends on the cochlea being mounted flat. If the Z-stack is uneven (e.g., the inner hair cells are on a fold) or the inner hair cells are rotated or tilted, the plane may not accurately separate the pillar and modiolar sides.
-* **habenular-cuticular plane definition**: The habenular-cuticular plane uses the basal spot as its base and is placed perpendicular to the pillar-modiolar plane.
+* **Habenular-cuticular plane definition**: The habenular-cuticular plane uses the basal spot as its base and is placed perpendicular to the pillar-modiolar plane.
 
 ---
 
