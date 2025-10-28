@@ -24,7 +24,9 @@ dependencies = [
   "typer>=0.20",
   "xlrd>=2.0.2",
 ]
-optional-dependencies.dev = [ "pytest>=8.4.2" ]
+optional-dependencies.dev = [
+  "pytest>=8.4.2",
+]
 scripts.pmc = "pmc_app.cli:app"
 
 [tool.setuptools.packages.find]

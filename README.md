@@ -129,13 +129,12 @@ Requirements:
 git clone https://github.com/thepyottlab/pillar-modiolar-classifier
 cd pillar-modiolar-classifier
 
-# create and activate a venv
-python -m venv .venv
+# create and activate a Python 3.12 venv
+py -3.12 -m venv .venv
 .venv\Scripts\activate
 
-# install in editable mode with deps
-python.exe -m pip install -U pip
-pip install -e .[all]   # or simply: pip install -e .
+# install in editable mode with deps and development extras (e.g., pytest)
+pip install -e .[dev]
 
 # launch the GUI
 python -m pmc_app
