@@ -6,6 +6,7 @@ import configparser
 import logging
 import os
 import textwrap
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -237,7 +238,7 @@ def _wrap_tt(text: str, width: int = TOOLTIP_WRAP_CH) -> str:
 
 def _tooltip_hide() -> None:
     """Hide tooltip text without type-stub mismatch."""
-    cast("Any", QToolTip).hideText()
+    cast(Callable[[], None], QToolTip.hideText)()
 
 
 class ToolTipDelayFilter(QObject):
@@ -252,8 +253,11 @@ class ToolTipDelayFilter(QObject):
         self._target: QWidget | None = None
         self._timer.timeout.connect(self._show)
 
-    def eventFilter(self, obj: QObject, event: QEvent, **_kwargs: object) -> bool:  # noqa: N802
+    def eventFilter(self, *args: Any) -> bool:  # noqa: N802
         """Filter tooltip-related events for the installed widgets."""
+        obj = cast(QObject, args[0])
+        event = cast(QEvent, args[1])
+
         t = event.type()
 
         if t in (QEvent.Enter, QEvent.HoverEnter):

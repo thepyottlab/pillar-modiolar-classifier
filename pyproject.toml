@@ -7,6 +7,7 @@ name = "pillar-modiolar-classifier"
 version = "1.4.0"
 description = "Standalone Napari-based Pillar–Modiolar synapse classifier"
 readme = "README.md"
+license = { text = "MIT" }
 authors = [ { name = "Tom Naber" } ]
 requires-python = ">=3.12"
 classifiers = [
@@ -23,10 +24,7 @@ dependencies = [
   "typer>=0.20",
   "xlrd>=2.0.2",
 ]
-
-optional-dependencies.dev = [
-  "pytest>=8.4.2",
-]
+optional-dependencies.dev = [ "pytest>=8.4.2" ]
 scripts.pmc = "pmc_app.cli:app"
 
 [tool.setuptools.packages.find]
@@ -40,7 +38,7 @@ pmc_app = [ "resources/*" ]
 [tool.ruff]
 target-version = "py312"
 line-length = 88
-src = [ ".", "src" ]
+src = [ "." ]
 extend-exclude = [
   ".mypy_cache",
   ".ruff_cache",
@@ -78,7 +76,6 @@ skip = "./.git,./.venv,./build,./dist,./.mypy_cache,./.ruff_cache,./docs/_build"
 [tool.pyproject-fmt]
 indent = 2
 column_width = 120
-max_supported_python = "3.14"
 
 [tool.mypy]
 python_version = "3.12"
@@ -104,9 +101,15 @@ exclude = '''
 '''
 
 [[tool.mypy.overrides]]
-module = [ "pytest", "pytest.*", "qtpy.*", "napari", "magicgui.*" ]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = [ "typer" ]
+module = [
+  "pytest",
+  "pytest.*",
+  "napari",
+  "napari.*",
+  "magicgui",
+  "magicgui.*",
+  "qtpy",
+  "qtpy.*",
+  "typer",
+]
 ignore_missing_imports = true

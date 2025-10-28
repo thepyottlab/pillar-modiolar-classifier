@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import suppress
-from typing import Any
+from typing import Any, cast
 from weakref import WeakKeyDictionary
 
 import napari
 import numpy as np
 import pandas as pd
 from magicgui.widgets import CheckBox, Container, PushButton
+from napari.layers import Layer, Points, Shapes, Vectors
 from numpy.typing import NDArray
 
 _VIEWER_STATE: WeakKeyDictionary[napari.Viewer, dict[str, Any]] = WeakKeyDictionary()
@@ -259,7 +260,7 @@ def draw_objects(
         return out
 
     def update_points(
-        layer: napari.layers.Points,
+        layer: Points,
         pts: NDArray[np.float64],
         sizes: Any,
         colors: NDArray[np.float32],
@@ -281,13 +282,13 @@ def draw_objects(
         layer.border_color = colors
         layer.refresh()
 
-    def update_shapes(layer: napari.layers.Shapes, data_list: list[np.ndarray]) -> None:
+    def update_shapes(layer: Shapes, data_list: list[np.ndarray]) -> None:
         """Batch-update a shapes layer."""
         with layer.events.blocker_all():
             layer.data = data_list
         layer.refresh()
 
-    def update_vectors(layer: napari.layers.Vectors | None, data: np.ndarray) -> None:
+    def update_vectors(layer: Vectors | None, data: np.ndarray) -> None:
         """Batch-update a vectors layer."""
         if layer is None:
             return
@@ -296,7 +297,7 @@ def draw_objects(
         layer.refresh()
 
     def update_label_points(
-        layer: napari.layers.Points | None,
+        layer: Points | None,
         pos3: NDArray[np.float64] | np.ndarray,
         labels_txt: list[str] | None,
     ) -> None:
@@ -325,7 +326,7 @@ def draw_objects(
             with suppress(Exception):
                 layer.text.visible = False
             layer.data = pos3
-            layer.text.string = {"array": lab}
+            cast(Any, layer.text).string = {"array": lab, "default": ""}
             with suppress(Exception):
                 layer.text.visible = prev_vis
         layer.refresh()
@@ -335,7 +336,7 @@ def draw_objects(
     vis_prog = False
 
     def bind_user_vis(
-        layer: napari.layers.Layer | None, key: str, seed_from_layer: bool = True
+        layer: Layer | None, key: str, seed_from_layer: bool = True
     ) -> None:
         """Track user-driven visibility changes for a layer under `key`."""
         if layer is None:
@@ -344,7 +345,7 @@ def draw_objects(
             user_vis[key] = bool(layer.visible)
 
         def _on_visible_change(
-            _event: Any = None, _k: str = key, _layer: napari.layers.Layer = layer
+            _event: Any = None, _k: str = key, _layer: Layer = layer
         ) -> None:
             nonlocal vis_prog
             if vis_prog:
@@ -353,7 +354,7 @@ def draw_objects(
 
         layer.events.visible.connect(_on_visible_change)
 
-    def track(layer: napari.layers.Layer | None, key: str) -> None:
+    def track(layer: Layer | None, key: str) -> None:
         """Bind visibility and seed `user_vis` from the layer."""
         bind_user_vis(layer, key, seed_from_layer=True)
 
@@ -503,7 +504,7 @@ def draw_objects(
         )
         track(distance_labels_psds_hc, "__hc_lbl_p__")
 
-    def set_vis(layer: napari.layers.Layer | None, key: str, has: bool) -> None:
+    def set_vis(layer: Layer | None, key: str, has: bool) -> None:
         """Programmatically set layer visibility without clobbering user choice."""
         nonlocal vis_prog
         if layer is not None:
@@ -751,9 +752,7 @@ def draw_objects(
         update_label_points(distance_labels_ribbons_hc, mid_r_hc, txt_r_hc)
         update_label_points(distance_labels_psds_hc, mid_p_hc, txt_p_hc)
 
-    def recolor_layer_for_rows(
-        layer: napari.layers.Points, rows: pd.DataFrame, obj: str
-    ) -> None:
+    def recolor_layer_for_rows(layer: Points, rows: pd.DataFrame, obj: str) -> None:
         """Only recolor an existing points layer; do not change geometry."""
         if not hasattr(layer, "data"):
             return
