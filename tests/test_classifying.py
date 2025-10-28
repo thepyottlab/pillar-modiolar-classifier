@@ -1,3 +1,9 @@
+"""Tests for parsing and minimal processing used by classification paths.
+
+These tests monkeypatch Excel reading to provide small in-memory DataFrames that
+mimic the expected parser outputs.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,14 +17,14 @@ from pmc_app.processing import merge_dfs, process_position_df, process_volume_df
 
 
 def _vol_sheet() -> pd.DataFrame:
-    """Mimic parser._read_excel_safe() output for a Volume sheet."""
+    """Return a tiny 'Volume' sheet fixture."""
     return pd.DataFrame(
         {"ID": [1, 2], "Volume": [10.0, 20.0], "Set 1": ["x", ""], "Set 2": ["", "x"]}
     )
 
 
 def _pos_sheet() -> pd.DataFrame:
-    """Minimal Position sheet: three synapses and two anchors."""
+    """Return a tiny 'Position' sheet with three synapses and two anchors."""
     return pd.DataFrame(
         {
             "Position X": [0, 1, 2, 0, 0, 0, 0],
@@ -40,6 +46,7 @@ def _pos_sheet() -> pd.DataFrame:
 
 @pytest.fixture
 def cfg(tmp_path: Path) -> FinderConfig:
+    """Create a minimal :class:`FinderConfig` rooted at a temporary folder."""
     return FinderConfig(
         folder=tmp_path,
         ribbons="rib",
@@ -54,9 +61,11 @@ def cfg(tmp_path: Path) -> FinderConfig:
 
 
 def test_parse_and_process_monkeypatched(
-    monkeypatch: pytest.MonkeyPatch, cfg: FinderConfig, _tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    cfg: FinderConfig,
+    tmp_path: Path,  # noqa: ARG001
 ) -> None:
-    """Patches Excel reader, then validates processing and merge steps."""
+    """Patched Excel reader yields expected processed/merged DataFrames."""
 
     def fake_read_excel_safe(_path: Path, sheet: str) -> pd.DataFrame:
         if sheet == "Volume":

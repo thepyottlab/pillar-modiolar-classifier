@@ -31,7 +31,9 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
         return df[existing].copy()
 
     # derive IHC label from first non-empty 'Set N' hit per row
-    mask = df[set_cols].notna() & (df[set_cols].astype(str).apply(lambda s: s.str.strip()) != "")
+    mask = df[set_cols].notna() & (
+        df[set_cols].astype(str).apply(lambda s: s.str.strip()) != ""
+    )
     has_any = mask.fillna(False).filter(like="Set").any(axis=1)
     set_col_series = mask.fillna(False).idxmax(axis=1).where(has_any)
     ihc_label = set_col_series.str.extract(r"Set\s*(\d+)", expand=False).astype(object)
@@ -70,7 +72,9 @@ def process_position_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df[[c for c in out_cols if c in df.columns]].copy()
 
     # extract numeric label from "Spots <N>" names (only rows that have such names)
-    df["ihc_label"] = df["object"].astype(str).str.extract(r"^Spots\s*(\d+)", expand=False)
+    df["ihc_label"] = (
+        df["object"].astype(str).str.extract(r"^Spots\s*(\d+)", expand=False)
+    )
 
     # within each IHC label, lowest object_id = apical; highest = basal
     mask = df["ihc_label"].notna()
@@ -121,7 +125,9 @@ def merge_dfs(
     mask = df["ihc_label"].isna() & df["object"].isin([cfg.ribbons_obj, cfg.psds_obj])
     df.loc[mask, "object"] = "Unclassified " + df.loc[mask, "object"]
 
-    df = df[["id", "object", "ihc_label", "object_id", "pos_x", "pos_y", "pos_z", "volume"]]
+    df = df[
+        ["id", "object", "ihc_label", "object_id", "pos_x", "pos_y", "pos_z", "volume"]
+    ]
 
     df = df.astype(
         {

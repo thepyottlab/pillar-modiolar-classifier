@@ -25,9 +25,19 @@ class GroupValidationError(PmcError):
     """Raised when one or more groups fail required token checks.
 
     Attributes:
-        groups: The dict of valid groups that *did* pass validation.
+        groups: Mapping of group ID to :class:`Group` instances that *did* pass
+            validation (useful for exposing partial results).
     """
 
     def __init__(self, message: str, groups: dict[str, Group] | None = None) -> None:
+        """Initialize the exception.
+
+        Args:
+            message: Readable explanation of the validation failure.
+            groups: Mapping of group ID to groups that passed validation.
+                If provided, allows callers to access partial results.
+                Defaults
+                to ``None``.
+        """
         super().__init__(message)
         self.groups: dict[str, Group] = groups or {}

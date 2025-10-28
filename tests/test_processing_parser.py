@@ -1,3 +1,8 @@
+"""Integration-style tests for parsing and processing helpers.
+
+Uses monkeypatched Excel reads to validate downstream processing and merge logic.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,14 +16,14 @@ from pmc_app.processing import merge_dfs, process_position_df, process_volume_df
 
 
 def _build_volume_df() -> pd.DataFrame:
-    """Minimal Volume sheet with two objects labeled across Set 1/2."""
+    """Return a tiny 'Volume' sheet with two labeled objects across Set 1/2."""
     return pd.DataFrame(
         {"ID": [1, 2], "Volume": [10.0, 20.0], "Set 1": ["x", ""], "Set 2": ["", "x"]}
     )
 
 
 def _build_position_df() -> pd.DataFrame:
-    """Minimal Position sheet with synapses (Spots 1) and anchors."""
+    """Return a tiny 'Position' sheet with synapses and pillar/modiolar anchors."""
     return pd.DataFrame(
         {
             "Position X": [0, 1, 2, 0, 0, 0, 0],
@@ -40,6 +45,7 @@ def _build_position_df() -> pd.DataFrame:
 
 @pytest.fixture
 def cfg(tmp_path: Path) -> FinderConfig:
+    """Create a minimal :class:`FinderConfig` rooted at a temporary folder."""
     return FinderConfig(
         folder=tmp_path,
         ribbons="rib",
@@ -56,7 +62,7 @@ def cfg(tmp_path: Path) -> FinderConfig:
 def test_parse_and_process_monkeypatched(
     monkeypatch: pytest.MonkeyPatch, cfg: FinderConfig
 ) -> None:
-    """Parse uses the patched reader; processing derives labels and merges correctly."""
+    """Patched parser + processing derive labels and merge correctly."""
 
     def fake_read_excel_safe(_path: Path, sheet: str) -> pd.DataFrame:
         if sheet == "Volume":

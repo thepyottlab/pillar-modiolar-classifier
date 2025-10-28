@@ -52,18 +52,28 @@ def export_all(
     extension: Annotated[
         str, typer.Option(help="File extension to scan (e.g., .xls, .xlsx)")
     ] = ".xls",
-    ribbons: Annotated[str, typer.Option(help="Substring token for ribbon files")] = "rib",
+    ribbons: Annotated[
+        str, typer.Option(help="Substring token for ribbon files")
+    ] = "rib",
     psds: Annotated[str, typer.Option(help="Substring token for PSD files")] = "psd",
-    positions: Annotated[str, typer.Option(help="Substring token for position files")] = "pos",
+    positions: Annotated[
+        str, typer.Option(help="Substring token for position files")
+    ] = "pos",
     ribbons_obj: Annotated[
         str, typer.Option(help="Object name for ribbons in the sheets")
     ] = "ribbons",
-    psds_obj: Annotated[str, typer.Option(help="Object name for PSDs in the sheets")] = "PSDs",
-    pillar_obj: Annotated[str, typer.Option(help="Object name for pillar anchors")] = "pillar",
+    psds_obj: Annotated[
+        str, typer.Option(help="Object name for PSDs in the sheets")
+    ] = "PSDs",
+    pillar_obj: Annotated[
+        str, typer.Option(help="Object name for pillar anchors")
+    ] = "pillar",
     modiolar_obj: Annotated[
         str, typer.Option(help="Object name for modiolar anchors")
     ] = "modiolar",
-    case_insensitive: Annotated[bool, typer.Option(help="Case-insensitive token matching")] = True,
+    case_insensitive: Annotated[
+        bool, typer.Option(help="Case-insensitive token matching")
+    ] = True,
     ribbons_only: Annotated[bool, typer.Option(help="Process only ribbons")] = False,
     psds_only: Annotated[bool, typer.Option(help="Process only PSDs")] = False,
     identify_poles: Annotated[

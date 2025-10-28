@@ -41,12 +41,16 @@ def _read_excel_safe(path: Path, sheet: str) -> pd.DataFrame:
         df.columns = df.iloc[0].astype(str).str.strip()
         df = df.iloc[1:].reset_index(drop=True)
     except Exception as e:
-        raise ParseError(f"Unexpected sheet format in '{path}' sheet='{sheet}': {e}") from e
+        raise ParseError(
+            f"Unexpected sheet format in '{path}' sheet='{sheet}': {e}"
+        ) from e
 
     return df
 
 
-def parse_group(group: Group, cfg: FinderConfig) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def parse_group(
+    group: Group, cfg: FinderConfig
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Read ribbons, PSDs, and positions for a single group.
 
     Note:
@@ -66,7 +70,9 @@ def parse_group(group: Group, cfg: FinderConfig) -> tuple[pd.DataFrame, pd.DataF
     """
     pos_path = group.file_paths.get("positions")
     if pos_path is None:
-        raise ParseError(f"Positions file (token '{cfg.positions}') missing for '{group.id}'.")
+        raise ParseError(
+            f"Positions file (token '{cfg.positions}') missing for '{group.id}'."
+        )
 
     positions_df = _read_excel_safe(pos_path, "Position")
     positions_df["id"] = group.id

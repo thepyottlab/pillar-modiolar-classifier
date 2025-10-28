@@ -82,7 +82,9 @@ def find_groups(cfg: FinderConfig) -> dict[str, Group]:
         complete[gid] = Group(id=gid, file_paths=dict(roles))
 
     if problems:
-        summary = "Some IDs were skipped due to missing required files:\n" + "\n".join(problems)
+        summary = "Some IDs were skipped due to missing required files:\n" + "\n".join(
+            problems
+        )
         raise GroupValidationError(summary, groups=complete)
 
     return complete

@@ -1,5 +1,6 @@
-"""Typed configuration and lightweight data models for the Pillar–Modiolar
-Classifier app.
+"""Typed configuration and lightweight data models for the Pillar–Modiolar Classifier.
+
+Defines dataclasses and simple containers shared by parsing, processing, and GUI code.
 """
 
 from __future__ import annotations

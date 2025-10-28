@@ -133,9 +133,14 @@ def draw_objects(
         """Repeat the same RGBA color n times."""
         return np.tile(hex_to_rgba(hex_color), (n, 1))
 
-    COL_RIBBON, COL_PSD = "#CB2027", "#059748"
-    COL_PILLAR, COL_MODIOLAR, COL_GRAY, COL_DEFAULT = "#9D722A", "#7B3A96", "#8C8C8C", "#FFFFFF"
-    COL_WHITE, COL_YELLOW = "#FFFFFF", "#FFFF00"
+    col_ribbon, col_psd = "#CB2027", "#059748"
+    col_pillar, col_modiolar, col_gray, col_default = (
+        "#9D722A",
+        "#7B3A96",
+        "#8C8C8C",
+        "#FFFFFF",
+    )
+    col_white, col_yellow = "#FFFFFF", "#FFFF00"
 
     labels = sorted(
         [
@@ -156,9 +161,9 @@ def draw_objects(
     def plane_normal(poly: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Return (unit normal, anchor) for a rectangle polygon in ZYX space."""
         a0 = poly[0]
-        U = poly[2] - poly[0]
-        V = poly[1] - poly[0]
-        n = np.cross(U, V)
+        u = poly[2] - poly[0]
+        v = poly[1] - poly[0]
+        n = np.cross(u, v)
         nn = np.linalg.norm(n)
         if nn == 0:
             return np.array([0.0, 0.0, 1.0], float), a0
@@ -194,30 +199,30 @@ def draw_objects(
 
     def colors_for_rows(rows: pd.DataFrame, obj: str) -> NDArray[np.float32]:
         """Return RGBA colors for a subset of rows for a given object name."""
-        n = int(len(rows))
+        n = len(rows)
         if obj == ribbons:
-            c = solid(n, COL_RIBBON)
+            c = solid(n, col_ribbon)
             loc = rows["localization"]
             if cb_pil_rib.value:
-                c[loc.eq("pillar").to_numpy()] = hex_to_rgba(COL_WHITE)
+                c[loc.eq("pillar").to_numpy()] = hex_to_rgba(col_white)
             if cb_mod_rib.value:
-                c[loc.eq("modiolar").to_numpy()] = hex_to_rgba(COL_WHITE)
+                c[loc.eq("modiolar").to_numpy()] = hex_to_rgba(col_white)
             return c
         if obj == psds:
-            c = solid(n, COL_PSD)
+            c = solid(n, col_psd)
             loc = rows["localization"]
             if cb_pil_psd.value:
-                c[loc.eq("pillar").to_numpy()] = hex_to_rgba(COL_YELLOW)
+                c[loc.eq("pillar").to_numpy()] = hex_to_rgba(col_yellow)
             if cb_mod_psd.value:
-                c[loc.eq("modiolar").to_numpy()] = hex_to_rgba(COL_YELLOW)
+                c[loc.eq("modiolar").to_numpy()] = hex_to_rgba(col_yellow)
             return c
         if obj == cfg.pillar_obj:
-            return solid(n, COL_PILLAR)
+            return solid(n, col_pillar)
         if obj == cfg.modiolar_obj:
-            return solid(n, COL_MODIOLAR)
+            return solid(n, col_modiolar)
         if obj in ("apical", "basal"):
-            return solid(n, COL_GRAY)
-        return solid(n, COL_DEFAULT)
+            return solid(n, col_gray)
+        return solid(n, col_default)
 
     def base_size_for(obj: str) -> float:
         """Base glyph size for a category (scaled later for volumes)."""
@@ -537,7 +542,9 @@ def draw_objects(
         normal_getter: Callable[[str], tuple[np.ndarray, np.ndarray] | None],
     ) -> tuple[np.ndarray, np.ndarray, list[str]]:
         """Build vectors and midpoints for distances along a plane normal."""
-        mask = (df["object"] == obj_name) & (df["ihc_label"].astype(str).isin(sel_labels))
+        mask = (df["object"] == obj_name) & (
+            df["ihc_label"].astype(str).isin(sel_labels)
+        )
         rows = df.loc[mask]
         if rows.empty:
             return np.zeros((0, 2, 3), float), np.zeros((0, 3), float), []
@@ -558,17 +565,17 @@ def draw_objects(
             if not np.all(np.isfinite(n_hat)):
                 continue
 
-            P = np.array([r["pos_z"], r["pos_y"], r["pos_x"]], float)
+            p = np.array([r["pos_z"], r["pos_y"], r["pos_x"]], float)
             d = float(r.get(dist_col, np.nan))
             if not np.isfinite(d) or abs(d) < d_eps:
                 continue
 
-            V = -d * n_hat
-            if not np.all(np.isfinite(V)) or np.linalg.norm(V) < d_eps:
+            v = -d * n_hat
+            if not np.all(np.isfinite(v)) or np.linalg.norm(v) < d_eps:
                 continue
 
-            vec_list.append(np.stack([P, V], 0))
-            mids.append(P + 0.5 * V)
+            vec_list.append(np.stack([p, v], 0))
+            mids.append(p + 0.5 * v)
             txt.append(f"{d:.2f}")
 
         if len(vec_list) == 0:
@@ -586,26 +593,30 @@ def draw_objects(
         """Rebuild layers according to the selected labels."""
         nonlocal vis_prog
 
-        EMPTY_VEC = np.zeros((0, 2, 3), float)
-        EMPTY_PTS = np.zeros((0, 3), float)
-        EMPTY_TXT: list[str] = []
+        empty_vec = np.zeros((0, 2, 3), float)
+        empty_pts = np.zeros((0, 3), float)
+        empty_txt: list[str] = []
 
         if not selected:
             df_points = df.loc[unlabeled_mask]
             idxs_pm: list[int] = []
             idxs_hc: list[int] = []
-            vec_r_pm, mid_r_pm, txt_r_pm = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
-            vec_p_pm, mid_p_pm, txt_p_pm = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
-            vec_r_hc, mid_r_hc, txt_r_hc = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
-            vec_p_hc, mid_p_hc, txt_p_hc = EMPTY_VEC, EMPTY_PTS, EMPTY_TXT
+            vec_r_pm, mid_r_pm, txt_r_pm = empty_vec, empty_pts, empty_txt
+            vec_p_pm, mid_p_pm, txt_p_pm = empty_vec, empty_pts, empty_txt
+            vec_r_hc, mid_r_hc, txt_r_hc = empty_vec, empty_pts, empty_txt
+            vec_p_hc, mid_p_hc, txt_p_hc = empty_vec, empty_pts, empty_txt
         else:
             labeled = df.loc[
                 ~unlabeled_mask & df["ihc_label"].astype(str).str.strip().isin(selected)
             ]
             df_points = pd.concat([labeled, df.loc[unlabeled_mask]], ignore_index=True)
 
-            idxs_pm = [pm_label_to_idx[label] for label in selected if label in pm_label_to_idx]
-            idxs_hc = [hc_label_to_idx[label] for label in selected if label in hc_label_to_idx]
+            idxs_pm = [
+                pm_label_to_idx[label] for label in selected if label in pm_label_to_idx
+            ]
+            idxs_hc = [
+                hc_label_to_idx[label] for label in selected if label in hc_label_to_idx
+            ]
 
             if idxs_pm:
                 update_shapes(pm_layer, [pm_planes[i] for i in idxs_pm])
@@ -617,32 +628,42 @@ def draw_objects(
                 update_shapes(hc_layer, [])
 
             vec_r_pm, mid_r_pm, txt_r_pm = (
-                build_distance_for(ribbons, selected, "pillar_modiolar_axis", pm_normal_for_label)
+                build_distance_for(
+                    ribbons, selected, "pillar_modiolar_axis", pm_normal_for_label
+                )
                 if show_rib
-                else (EMPTY_VEC, EMPTY_PTS, EMPTY_TXT)
+                else (empty_vec, empty_pts, empty_txt)
             )
             vec_p_pm, mid_p_pm, txt_p_pm = (
-                build_distance_for(psds, selected, "pillar_modiolar_axis", pm_normal_for_label)
+                build_distance_for(
+                    psds, selected, "pillar_modiolar_axis", pm_normal_for_label
+                )
                 if show_psd
-                else (EMPTY_VEC, EMPTY_PTS, EMPTY_TXT)
+                else (empty_vec, empty_pts, empty_txt)
             )
             vec_r_hc, mid_r_hc, txt_r_hc = (
                 build_distance_for(
                     ribbons, selected, "habenular_cuticular_axis", hc_normal_for_label
                 )
                 if show_rib
-                else (EMPTY_VEC, EMPTY_PTS, EMPTY_TXT)
+                else (empty_vec, empty_pts, empty_txt)
             )
             vec_p_hc, mid_p_hc, txt_p_hc = (
-                build_distance_for(psds, selected, "habenular_cuticular_axis", hc_normal_for_label)
+                build_distance_for(
+                    psds, selected, "habenular_cuticular_axis", hc_normal_for_label
+                )
                 if show_psd
-                else (EMPTY_VEC, EMPTY_PTS, EMPTY_TXT)
+                else (empty_vec, empty_pts, empty_txt)
             )
 
         vis_prog = True
         try:
-            pm_layer.visible = bool(user_vis.get("__pm_planes__", True) and bool(idxs_pm))
-            hc_layer.visible = bool(user_vis.get("__hc_planes__", True) and bool(idxs_hc))
+            pm_layer.visible = bool(
+                user_vis.get("__pm_planes__", True) and bool(idxs_pm)
+            )
+            hc_layer.visible = bool(
+                user_vis.get("__hc_planes__", True) and bool(idxs_hc)
+            )
         finally:
             vis_prog = False
 
@@ -654,21 +675,25 @@ def draw_objects(
                 pts = sel[["pos_z", "pos_y", "pos_x"]].to_numpy(float)
                 base = base_size_for(str(obj))
                 if obj == ribbons:
-                    sizes = base * (sel["volume"].astype(float).to_numpy() / max_vol_ribbon)
+                    sizes = base * (
+                        sel["volume"].astype(float).to_numpy() / max_vol_ribbon
+                    )
                     colors = colors_for_rows(sel, str(obj))
                 elif obj == psds:
-                    sizes = base * (sel["volume"].astype(float).to_numpy() / max_vol_psd)
+                    sizes = base * (
+                        sel["volume"].astype(float).to_numpy() / max_vol_psd
+                    )
                     colors = colors_for_rows(sel, str(obj))
                 else:
                     sizes = base
                     if obj == cfg.pillar_obj:
-                        colors = solid(n, COL_PILLAR)
+                        colors = solid(n, col_pillar)
                     elif obj == cfg.modiolar_obj:
-                        colors = solid(n, COL_MODIOLAR)
+                        colors = solid(n, col_modiolar)
                     elif obj in ("apical", "basal"):
-                        colors = solid(n, COL_GRAY)
+                        colors = solid(n, col_gray)
                     else:
-                        colors = solid(n, COL_DEFAULT)
+                        colors = solid(n, col_default)
                 update_points(layer, pts, sizes, colors)
             vis_prog = True
             try:

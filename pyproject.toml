@@ -1,68 +1,112 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+requires = [ "setuptools>=68", "wheel" ]
 
 [project]
 name = "pillar-modiolar-classifier"
 version = "1.4.0"
 description = "Standalone Napari-based Pillar–Modiolar synapse classifier"
 readme = "README.md"
+authors = [ { name = "Tom Naber" } ]
 requires-python = ">=3.12"
-authors = [{ name = "Tom Naber" }]
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
 dependencies = [
-  "pandas>=2.3.3",
-  "numpy>=2.3.4",
-  "typer>=0.20.0",
-  "xlrd>=2.0.2",
   "napari[all]>=0.6.6",
+  "numpy>=2.3.4",
+  "pandas>=2.3.3",
   "pyqt5>=5.15.11",
+  "typer>=0.20",
+  "xlrd>=2.0.2",
 ]
 
-[project.optional-dependencies]
-dev = [
+optional-dependencies.dev = [
   "pytest>=8.4.2",
 ]
-
-[project.scripts]
-pmc = "pmc_app.cli:app"
+scripts.pmc = "pmc_app.cli:app"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["pmc_app*"]
-exclude = ["tests*"]
+where = [ "." ]
+include = [ "pmc_app*" ]
+exclude = [ "tests*" ]
 
 [tool.setuptools.package-data]
-pmc_app = ["resources/*"]
-
-[tool.black]
-line-length = 100
-target-version = ["py312"]
-
-[tool.isort]
-profile = "black"
-line_length = 100
-force_single_line = false
-known_first_party = ["pmc_app"]
+pmc_app = [ "resources/*" ]
 
 [tool.ruff]
-line-length = 100
 target-version = "py312"
+line-length = 88
+src = [ ".", "src" ]
+extend-exclude = [
+  ".mypy_cache",
+  ".ruff_cache",
+  ".venv",
+  "build",
+  "dist",
+  "docs/_build",
+]
 
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "C4", "SIM", "ARG"]
-ignore = ["E203", "E501"]
+format.indent-style = "space"
+format.quote-style = "double"
+format.line-ending = "lf"
+format.docstring-code-format = true
+lint.select = [ "E", "F" ]
+lint.extend-select = [
+  "B",   # bugbear (sharp edges)
+  "C4",  # comprehensions
+  "D",   # pydocstyle (docstrings)
+  "I",   # isort (imports)
+  "N",   # pep8-naming
+  "SIM", # simplify
+  "TID", # tidy imports
+  "UP",  # pyupgrade
+]
+lint.ignore = [ "E501" ]
+lint.per-file-ignores."**/__init__.py" = [ "F401" ]
+lint.pydocstyle.convention = "google"
+lint.preview = true
 
+[tool.codespell]
+ignore-words-list = "by,be,ba,lew,lieu,hew,sew,dew"
+builtin = "clear,rare,informal,usage,code,names"
+skip = "./.git,./.venv,./build,./dist,./.mypy_cache,./.ruff_cache,./docs/_build"
+
+[tool.pyproject-fmt]
+indent = 2
+column_width = 120
+max_supported_python = "3.14"
 
 [tool.mypy]
 python_version = "3.12"
 disallow_untyped_defs = true
-ignore_missing_imports = true
-warn_unused_ignores = true
-warn_redundant_casts = true
-warn_unreachable = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
 no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unused_configs = true
+strict_equality = true
+show_error_codes = true
+pretty = true
+exclude = '''
+(?x)(
+  ^\.venv/|
+  ^build/|
+  ^dist/|
+  ^\.mypy_cache/|
+  ^\.ruff_cache/|
+  ^docs/_build/
+)$
+'''
 
+[[tool.mypy.overrides]]
+module = [ "pytest", "pytest.*", "qtpy.*", "napari", "magicgui.*" ]
+ignore_missing_imports = true
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-q"
+[[tool.mypy.overrides]]
+module = [ "typer" ]
+ignore_missing_imports = true

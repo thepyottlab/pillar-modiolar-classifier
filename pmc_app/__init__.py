@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib import import_module
 
-__all__ = ["launch_gui", "__version__"]
+__all__ = ["__version__", "launch_gui"]
 __version__ = "1.4.0"
 
 
