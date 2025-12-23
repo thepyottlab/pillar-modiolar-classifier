@@ -57,6 +57,8 @@ from .parser import parse_group
 from .processing import merge_dfs, process_position_df, process_volume_df
 from .visualizer import draw_objects
 
+APP_VERSION = "1.5"
+
 
 @dataclass(frozen=True)
 class TooltipText:
@@ -1321,7 +1323,7 @@ class App:
         """Create and show the main window if needed."""
         if getattr(self, "_window", None) is None:
             self._window = QMainWindow()
-            self._window.setWindowTitle("Pillar–Modiolar Classifier")
+            self._window.setWindowTitle(f"Pillar–Modiolar Classifier v{APP_VERSION}")
             icon_path = str(resource_path("icon.ico"))
             self._window.setWindowIcon(QIcon(icon_path))
             central = QWidget(self._window)
