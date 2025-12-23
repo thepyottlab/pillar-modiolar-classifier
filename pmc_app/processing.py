@@ -19,7 +19,7 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: Normalized table.
     """
-    out_cols = ["id", "ihc_label", "object", "object_id", "volume"]
+    out_cols = ["id", "ihc_label", "object", "object_id", "volume", "area"]
 
     set_cols = sorted(
         (c for c in df.columns if isinstance(c, str) and c.startswith("Set ")),
@@ -40,7 +40,8 @@ def process_volume_df(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
     df["ihc_label"] = ihc_label
-    df = df.rename(columns={"ID": "object_id", "Volume": "volume"})
+
+    df = df.rename(columns={"ID": "object_id", "Volume": "volume", "Area": "area"})
 
     existing = [c for c in out_cols if c in df.columns]
     return df[existing].copy()
@@ -125,22 +126,34 @@ def merge_dfs(
     mask = df["ihc_label"].isna() & df["object"].isin([cfg.ribbons_obj, cfg.psds_obj])
     df.loc[mask, "object"] = "Unclassified " + df.loc[mask, "object"]
 
-    df = df[
-        ["id", "object", "ihc_label", "object_id", "pos_x", "pos_y", "pos_z", "volume"]
+    cols = [
+        "id",
+        "object",
+        "ihc_label",
+        "object_id",
+        "pos_x",
+        "pos_y",
+        "pos_z",
+        "volume",
     ]
+    if "area" in df.columns:
+        cols.append("area")
 
-    df = df.astype(
-        {
-            "id": "string",
-            "object": "string",
-            "ihc_label": "str",
-            "object_id": "int64",
-            "pos_x": "float64",
-            "pos_y": "float64",
-            "pos_z": "float64",
-            "volume": "float64",
-        },
-        errors="ignore",
-    )
+    df = df[cols]
+
+    dtypes = {
+        "id": "string",
+        "object": "string",
+        "ihc_label": "str",
+        "object_id": "int64",
+        "pos_x": "float64",
+        "pos_y": "float64",
+        "pos_z": "float64",
+        "volume": "float64",
+    }
+    if "area" in df.columns:
+        dtypes["area"] = "float64"
+
+    df = df.astype(dtypes, errors="ignore")
 
     return df

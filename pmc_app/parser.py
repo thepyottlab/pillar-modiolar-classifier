@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 
@@ -17,7 +18,7 @@ def _empty_volume_df() -> pd.DataFrame:
     return pd.DataFrame(columns=_EMPTY_VOL_COLS)
 
 
-def _read_excel_safe(path: Path, sheet: str) -> pd.DataFrame:
+def _read_excel_safe(path: Path, sheet: str) -> pd.DataFrame | None:
     """Read an Excel sheet and normalize the header row placement.
 
     Promotes the first row to the header to preserve legacy behavior.
@@ -35,6 +36,8 @@ def _read_excel_safe(path: Path, sheet: str) -> pd.DataFrame:
     try:
         df = pd.read_excel(path, sheet_name=sheet)
     except Exception as e:
+        if sheet == "Area":
+            return None
         raise ParseError(f"Failed reading '{path}' sheet='{sheet}': {e}") from e
 
     try:
@@ -74,7 +77,7 @@ def parse_group(
             f"Positions file (token '{cfg.positions}') missing for '{group.id}'."
         )
 
-    positions_df = _read_excel_safe(pos_path, "Position")
+    positions_df = cast(pd.DataFrame, _read_excel_safe(pos_path, "Position"))
     positions_df["id"] = group.id
     positions_df["source_file"] = pos_path.name
 
@@ -82,10 +85,16 @@ def parse_group(
     if cfg.mode in (InputMode.BOTH, InputMode.RIBBONS_ONLY):
         rib_path = group.file_paths.get("ribbons")
         if rib_path is not None:
-            ribbons_df = _read_excel_safe(rib_path, "Volume")
+            ribbons_df = cast(pd.DataFrame, _read_excel_safe(rib_path, "Volume"))
             ribbons_df["id"] = group.id
             ribbons_df["source_file"] = rib_path.name
             ribbons_df["object"] = cfg.ribbons_obj
+
+            ribbons_df_area = cast(pd.DataFrame, _read_excel_safe(rib_path, "Area"))
+            if ribbons_df_area is not None:
+                ribbons_df = ribbons_df.merge(
+                    ribbons_df_area[["ID", "Area"]], on="ID", how="left"
+                )
         else:
             ribbons_df = _empty_volume_df()
     else:
@@ -95,10 +104,16 @@ def parse_group(
     if cfg.mode in (InputMode.BOTH, InputMode.PSDS_ONLY):
         psd_path = group.file_paths.get("psds")
         if psd_path is not None:
-            psds_df = _read_excel_safe(psd_path, "Volume")
+            psds_df = cast(pd.DataFrame, _read_excel_safe(psd_path, "Volume"))
             psds_df["id"] = group.id
             psds_df["source_file"] = psd_path.name
             psds_df["object"] = cfg.psds_obj
+
+            psds_df_area = cast(pd.DataFrame, _read_excel_safe(psd_path, "Area"))
+            if psds_df_area is not None:
+                psds_df = psds_df.merge(
+                    psds_df_area[["ID", "Area"]], on="ID", how="left"
+                )
         else:
             psds_df = _empty_volume_df()
     else:
