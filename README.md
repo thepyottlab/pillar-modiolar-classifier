@@ -9,7 +9,7 @@ A small **Napari-based** desktop app to help analyze inner hair cell (IHC) synap
 * Builds per-IHC pillar–modiolar and habenular-cuticular planes
 * Classifies synapses (pillar vs. modiolar)
 * Computes distances to the planes
-* Visualizes results in 3D and exports CSVs
+* Visualizes results in 3D and exports CSVs with per-IHC synapse coordinates
 
 > **Target platform:** Windows (10/11).
 > Works only with data exported from Imaris following the provided protocol.
@@ -99,7 +99,7 @@ ID A sum.xls      # positions (apical/basal/IHC etc.)
 ## Exported CSVs
 
 * **Per-group export** or **Export all**
-* Each CSV contains the unified table with classifications and **distance to the finite plane** for each synapse
+* Each CSV contains the unified table with classifications and **distance to the finite plane** for each synapse. Area will be exported in addition to volume if present in the `.xls` files.
 * Choose an output folder
 
 ---
